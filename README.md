@@ -1,3 +1,4 @@
+ HEAD
 # The Archive
 
 This site is a static HTML page designed for GitHub Pages.
@@ -23,3 +24,6 @@ https://<your-username>.github.io/<your-repository-name>/
 ## Notes
 - This site uses Firebase for the live comment and post features, so the deployed version will work only if the Firebase configuration stays intact.
 - Make sure all referenced image files are uploaded with the repository.
+
+# my-personal-website
+ 5a472fc0822370bf2f02fd49bfb1ea0c82c0def7
