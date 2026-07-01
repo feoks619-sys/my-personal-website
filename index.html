@@ -1737,19 +1737,28 @@
         function toggleGlobalLike(fbKey, button, event) {
             event.stopPropagation();
             const postRef = database.ref('posts/' + fbKey);
-            
+
             postRef.once('value', (snapshot) => {
                 const post = snapshot.val();
                 if (!post) return;
 
-                let voterRegistry = post.voterRegistry ? Object.values(post.voterRegistry) : [];
-                let currentLikes = post.likes || 0;
-                const registrationIndex = voterRegistry.indexOf(userFingerprint);
+                const registryData = snapshot.child('voterRegistry').val() || {};
+                // Normalize registry entries to objects { fingerprint, timestamp, tag? }
+                const entries = Object.keys(registryData).map(k => {
+                    const v = registryData[k];
+                    if (v && typeof v === 'object' && v.fingerprint) return { key: k, fingerprint: v.fingerprint, timestamp: v.timestamp || 0, tag: v.tag || null };
+                    return { key: k, fingerprint: String(v), timestamp: 0, tag: null };
+                });
 
-                if (registrationIndex === -1) {
+                const existing = entries.find(e => e.fingerprint === userFingerprint);
+                let currentLikes = post.likes || 0;
+
+                if (!existing) {
+                    // Add a richer like record (fingerprint + timestamp + optional tag)
+                    const likeRecord = { fingerprint: userFingerprint, timestamp: Date.now(), tag: (claimedSoulTag || null) };
+                    database.ref('posts/' + fbKey + '/voterRegistry').push(likeRecord);
                     currentLikes += 1;
-                    database.ref('posts/' + fbKey + '/voterRegistry').push(userFingerprint);
-                    
+
                     const pop = document.createElement('div');
                     pop.classList.add('pop-heart');
                     pop.innerHTML = "♥";
@@ -1762,14 +1771,16 @@
                     button.parentElement.appendChild(pop);
                     setTimeout(() => { pop.remove(); }, 800);
                 } else {
-                    currentLikes = Math.max(0, currentLikes - 1);
-                    const registryData = snapshot.child('voterRegistry').val();
+                    // Remove any registry entries that match our fingerprint (object or raw string)
                     Object.keys(registryData).forEach(rk => {
-                        if (registryData[rk] === userFingerprint) {
+                        const v = registryData[rk];
+                        if ((v && typeof v === 'object' && v.fingerprint === userFingerprint) || String(v) === userFingerprint) {
                             database.ref('posts/' + fbKey + '/voterRegistry/' + rk).remove();
                         }
                     });
+                    currentLikes = Math.max(0, currentLikes - 1);
                 }
+
                 postRef.update({ likes: currentLikes });
             });
         }
@@ -2302,12 +2313,59 @@
                 }).join('');
             });
 
-            // likes: list posts with likes
+            // likes: list recent like events with who liked and when (resolve registered nicknames)
             database.ref('posts').once('value', (snapshot) => {
                 const posts = snapshot.val() || {};
-                const items = Object.keys(posts).map(k => ({ key:k, likes: posts[k].likes || 0, text: posts[k].text || '' })).sort((a,b)=>b.likes-a.likes).slice(0,20);
-                if (items.length === 0) likesList.innerHTML = '<div class="trash-item">No likes yet.</div>';
-                else likesList.innerHTML = items.map(it=>`<div class="trash-item"><strong>${it.likes}</strong> • ${it.text.slice(0,60)}<small>post: ${it.key}</small></div>`).join('');
+                database.ref('registered_souls').once('value', (soulsSnap) => {
+                    const souls = soulsSnap.val() || {};
+                    const fingerprintToTag = {};
+                    Object.keys(souls).forEach(tag => { fingerprintToTag[souls[tag]] = tag; });
+
+                    const likesEvents = [];
+                    // Decode Firebase push key timestamp (first 8 chars) to milliseconds
+                    function pushKeyTimestamp(pushKey) {
+                        if (!pushKey) return 0;
+                        const PUSH_CHARS = "-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz";
+                        let ts = 0;
+                        for (let i = 0; i < 8 && i < pushKey.length; i++) {
+                            const idx = PUSH_CHARS.indexOf(pushKey.charAt(i));
+                            if (idx === -1) return 0;
+                            ts = ts * 64 + idx;
+                        }
+                        return ts || 0;
+                    }
+                    Object.keys(posts).forEach(postKey => {
+                        const post = posts[postKey] || {};
+                        const vr = post.voterRegistry || {};
+                        Object.keys(vr).forEach(vk => {
+                            const v = vr[vk];
+                            if (v && typeof v === 'object' && v.fingerprint) {
+                                const ts = v.timestamp || pushKeyTimestamp(vk) || 0;
+                                likesEvents.push({ fingerprint: v.fingerprint, tag: v.tag || fingerprintToTag[v.fingerprint] || 'anon', timestamp: ts, postKey, postText: post.text || '' });
+                            } else {
+                                const fp = String(v);
+                                const ts = pushKeyTimestamp(vk) || 0;
+                                likesEvents.push({ fingerprint: fp, tag: fingerprintToTag[fp] || 'anon', timestamp: ts, postKey, postText: post.text || '' });
+                            }
+                        });
+                    });
+
+                    likesEvents.sort((a,b) => {
+                        const ta = a.timestamp || 0;
+                        const tb = b.timestamp || 0;
+                        // Put entries with no timestamp (0) at the end
+                        if (ta === 0 && tb !== 0) return 1;
+                        if (tb === 0 && ta !== 0) return -1;
+                        return tb - ta;
+                    });
+                    const items = likesEvents.slice(0,40);
+                    if (items.length === 0) likesList.innerHTML = '<div class="trash-item">No likes yet.</div>';
+                    else likesList.innerHTML = items.map(it => `
+                        <div class="trash-item">
+                            <strong>${it.tag || 'anon'}</strong> liked <em>${(it.postText||'').slice(0,60)}</em>
+                            <small>post: ${it.postKey} • ${it.timestamp ? new Date(it.timestamp).toLocaleString() : 'time unknown'}</small>
+                        </div>`).join('');
+                });
             });
 
             // users: current registered souls
