@@ -170,18 +170,35 @@
             text-align: center; 
             z-index: 12; 
             position: relative;
+            width: min(92vw, 600px);
         }
-        #typed-text { font-size: 1.4rem; line-height: 1.8; letter-spacing: 1px; color: #4a3f35; }
+        #typed-text { font-size: 1.15rem; line-height: 1.6; letter-spacing: 0.5px; color: #4a3f35; }
 
         .view-thoughts-btn {
             opacity: 0;
             transition: opacity 1s ease;
-            margin-top: 40px;
+            margin-top: 24px;
+            padding: 10px 18px;
+            font-size: 0.95rem;
             border-color: #4a3f35 !important;
             color: #4a3f35 !important;
         }
         .view-thoughts-btn.reveal { opacity: 1; }
         .view-thoughts-btn:hover { background: #4a3f35 !important; color: #fefae0 !important; }
+
+        @media (max-width: 768px) {
+            #typed-text {
+                font-size: 1rem;
+                line-height: 1.5;
+                letter-spacing: 0.3px;
+            }
+
+            .view-thoughts-btn {
+                margin-top: 18px;
+                padding: 9px 16px;
+                font-size: 0.9rem;
+            }
+        }
 
         /* SCREEN 3: THE REVEALED THOUGHTS FEED */
         .feed-screen {
