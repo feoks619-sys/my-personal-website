@@ -1637,7 +1637,12 @@
 
                     const voterRegistry = post.voterRegistry || {};
                     Object.keys(voterRegistry).forEach(regKey => {
-                        if ((voterRegistry[regKey] || '').toString() === userFingerprint) {
+                        const regValue = voterRegistry[regKey];
+                        const matchesLike = regValue && typeof regValue === 'object'
+                            ? regValue.fingerprint === userFingerprint
+                            : String(regValue) === userFingerprint;
+
+                        if (matchesLike) {
                             trashLikes.push({
                                 user: currentTag,
                                 postKey,
@@ -1940,6 +1945,10 @@
                     trashPanel.setAttribute('aria-hidden', 'true');
                 }
                 refreshModerationState();
+                attachTrashListeners();
+                attachLiveListeners();
+                loadAdminTrashData();
+                loadLiveData();
                 renderStream();
             } else {
                 alert("Access Denied.");
@@ -2191,7 +2200,7 @@
             panel.setAttribute('aria-hidden', String(!open));
             panel.style.display = open ? 'flex' : 'none';
             if (open) {
-                if (!liveListeners.postsRef) {
+                if (!liveListeners.postsRef && !liveListeners.soulsRef) {
                     attachLiveListeners();
                 }
                 selectLiveTab('comments');
@@ -2199,12 +2208,12 @@
                 startLiveAutoRefresh();
             } else {
                 stopLiveAutoRefresh();
-                detachLiveListeners();
             }
         }
 
         function attachLiveListeners() {
             if (!isAdminLoggedIn) return;
+            if (liveListeners.postsRef || liveListeners.soulsRef) return;
             // Listen for new posts so we can attach per-post listeners
             liveListeners.postsRef = database.ref('posts');
             liveListeners.postsRef.once('value', (snapshot) => {
