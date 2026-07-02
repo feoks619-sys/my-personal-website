@@ -776,6 +776,7 @@
             box-shadow: 0 10px 30px rgba(74, 63, 53, 0.05);
             animation: fadeInPost 0.4s ease-out;
             z-index: 1;
+            overflow: visible;
             transition: background 0.5s ease, color 0.5s ease;
         }
         
@@ -1790,6 +1791,7 @@
                     setTimeout(() => { button.classList.remove('bursting'); }, 350);
 
                     const burstCount = 7;
+                    const card = button.closest('.post-card');
                     for (let i = 0; i < burstCount; i++) {
                         const pop = document.createElement('div');
                         pop.classList.add('pop-heart');
@@ -1801,10 +1803,20 @@
                         pop.style.setProperty('--x-drift', xDrift);
                         pop.style.setProperty('--y-drift', yDrift);
                         pop.style.setProperty('--r-drift', rDrift);
-                        pop.style.left = (button.offsetLeft + button.offsetWidth / 2 - 8) + "px";
-                        pop.style.top = (button.offsetTop - 8) + "px";
+
+                        if (card) {
+                            const buttonRect = button.getBoundingClientRect();
+                            const cardRect = card.getBoundingClientRect();
+                            pop.style.left = (buttonRect.left - cardRect.left + buttonRect.width / 2 - 10) + "px";
+                            pop.style.top = (buttonRect.top - cardRect.top - 8) + "px";
+                            card.appendChild(pop);
+                        } else {
+                            pop.style.left = (button.offsetLeft + button.offsetWidth / 2 - 8) + "px";
+                            pop.style.top = (button.offsetTop - 8) + "px";
+                            button.parentElement.appendChild(pop);
+                        }
+
                         pop.style.fontSize = `${1.1 + Math.random() * 0.3}rem`;
-                        button.parentElement.appendChild(pop);
                         setTimeout(() => { pop.remove(); }, 900);
                     }
                 } else {
