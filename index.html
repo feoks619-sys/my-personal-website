@@ -1853,12 +1853,14 @@
                 }
             }
 
-            database.ref('posts/' + postKey + '/whispers/' + whisperKey + '/replies').push({
+            const replyPayload = {
                 text: replyText,
-                user: asAdmin ? 'admin' : claimedSoulTag,
+                user: asAdmin ? 'admin' : (claimedSoulTag || 'anonymous soul'),
                 timestamp: Date.now(),
-                isAdmin: asAdmin
-            });
+                isAdmin: Boolean(asAdmin)
+            };
+
+            database.ref('posts/' + postKey + '/whispers/' + whisperKey + '/replies').push(replyPayload);
             inputElement.value = "";
         }
 
@@ -2593,7 +2595,7 @@
                                     ${replies.length > 0 ? `
                                         <div class="reply-list">
                                             ${replies.map(reply => {
-                                                const isAdminReply = Boolean(reply.isAdmin || reply.user === 'admin');
+                                                const isAdminReply = Boolean(reply.isAdmin || reply.user === 'admin' || reply.user === 'official');
                                                 const replyName = isAdminReply ? 'admin reply' : '@' + (reply.user || 'unknown');
                                                 return `
                                                     <div class="reply-bubble">
