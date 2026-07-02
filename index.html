@@ -877,35 +877,13 @@
             display: inline-block;
             font-size: 1.35rem;
             line-height: 1;
-            transition: transform 0.2s ease, color 0.2s ease, text-shadow 0.2s ease;
+            transition: color 0.2s ease, text-shadow 0.2s ease;
             color: #b5a880;
             text-shadow: none;
         }
         .heart-btn.liked .heart-icon {
             color: #ff2d55;
             text-shadow: 0 0 10px rgba(255, 45, 85, 0.35);
-        }
-        .heart-btn.bursting {
-            animation: heartPopPulse 0.4s ease-out;
-        }
-        .heart-btn.bursting .heart-icon {
-            animation: heartIconPop 0.4s cubic-bezier(.2,.8,.2,1.2);
-            color: #ff2d55;
-            text-shadow: 0 0 14px rgba(255, 45, 85, 0.45);
-        }
-
-        @keyframes heartPopPulse {
-            0% { transform: scale(1); }
-            40% { transform: scale(1.16); }
-            70% { transform: scale(0.96); }
-            100% { transform: scale(1); }
-        }
-
-        @keyframes heartIconPop {
-            0% { transform: scale(0.75) rotate(-8deg); }
-            40% { transform: scale(1.35) rotate(6deg); }
-            70% { transform: scale(0.95) rotate(-2deg); }
-            100% { transform: scale(1) rotate(0deg); }
         }
 
         /* ── MOBILE INPUT + ARROW CONTAINER ── */
@@ -1454,7 +1432,6 @@
         let globalPostsCache = [];
         let clickCount = 0;
         let moderationState = { bannedUsers: {}, commentCounts: {} };
-        let pendingLikeBurstPostKey = null;
 
         // Unique local fingerprint generated per browser installation to stop like spams globally
         if (!localStorage.getItem('archive_fingerprint')) {
@@ -1794,7 +1771,6 @@
                     const likeRecord = { fingerprint: userFingerprint, timestamp: Date.now(), tag: (claimedSoulTag || null) };
                     database.ref('posts/' + fbKey + '/voterRegistry').push(likeRecord);
                     currentLikes += 1;
-                    pendingLikeBurstPostKey = fbKey;
                 } else {
                     // Remove any registry entries that match our fingerprint (object or raw string)
                     Object.keys(registryData).forEach(rk => {
@@ -2562,7 +2538,12 @@
                 }
 
                 const registryValues = post.voterRegistry ? Object.values(post.voterRegistry) : [];
-                const hasBeenLikedByMe = registryValues.includes(userFingerprint);
+                const hasBeenLikedByMe = registryValues.some(entry => {
+                    if (entry && typeof entry === 'object' && entry.fingerprint) {
+                        return entry.fingerprint === userFingerprint;
+                    }
+                    return String(entry) === userFingerprint;
+                });
                 const currentLikesCount = post.likes || 0;
                 const heartSymbol = hasBeenLikedByMe ? "♥" : "♡";
                 const likedClass = hasBeenLikedByMe ? "liked" : "";
@@ -2646,17 +2627,6 @@
                         </div>
                     </div>
                 `;
-                if (post.fbKey === pendingLikeBurstPostKey) {
-                    requestAnimationFrame(() => {
-                        const burstButton = card.querySelector('.heart-btn');
-                        if (burstButton) {
-                            burstButton.classList.add('bursting');
-                            setTimeout(() => burstButton.classList.remove('bursting'), 350);
-                        }
-                        pendingLikeBurstPostKey = null;
-                    });
-                }
-
                 stream.appendChild(card);
             });
         }
