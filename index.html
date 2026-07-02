@@ -875,32 +875,37 @@
         .feed-screen.night-tides .heart-btn.liked { color: #ffcbd2 !important; }
         .heart-btn .heart-icon {
             display: inline-block;
-            font-size: 1.25rem;
+            font-size: 1.35rem;
             line-height: 1;
-            transition: transform 0.2s ease, color 0.2s ease;
+            transition: transform 0.2s ease, color 0.2s ease, text-shadow 0.2s ease;
+            color: #b5a880;
+            text-shadow: none;
         }
         .heart-btn.liked .heart-icon {
-            color: #ff4b5c;
-            text-shadow: 0 0 8px rgba(255, 75, 92, 0.25);
+            color: #ff2d55;
+            text-shadow: 0 0 10px rgba(255, 45, 85, 0.35);
         }
         .heart-btn.bursting {
-            animation: heartPopPulse 0.35s ease-out;
+            animation: heartPopPulse 0.4s ease-out;
         }
         .heart-btn.bursting .heart-icon {
-            animation: heartIconPop 0.35s ease-out;
-            color: #ff4b5c;
+            animation: heartIconPop 0.4s cubic-bezier(.2,.8,.2,1.2);
+            color: #ff2d55;
+            text-shadow: 0 0 14px rgba(255, 45, 85, 0.45);
         }
 
         @keyframes heartPopPulse {
             0% { transform: scale(1); }
-            50% { transform: scale(1.12); }
+            40% { transform: scale(1.16); }
+            70% { transform: scale(0.96); }
             100% { transform: scale(1); }
         }
 
         @keyframes heartIconPop {
-            0% { transform: scale(0.8); }
-            50% { transform: scale(1.25); }
-            100% { transform: scale(1); }
+            0% { transform: scale(0.75) rotate(-8deg); }
+            40% { transform: scale(1.35) rotate(6deg); }
+            70% { transform: scale(0.95) rotate(-2deg); }
+            100% { transform: scale(1) rotate(0deg); }
         }
 
         /* ── MOBILE INPUT + ARROW CONTAINER ── */
