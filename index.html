@@ -1007,6 +1007,7 @@
             padding: 8px 10px;
             font-size: 0.82rem;
             color: #4a3f35;
+            position: relative;
         }
         .feed-screen.night-tides .reply-bubble {
             background: #0f0102;
@@ -1018,6 +1019,30 @@
             font-size: 0.72rem;
             color: #a39683;
             margin-bottom: 3px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+
+        .reply-delete-btn {
+            background: none;
+            border: none;
+            color: #a39683;
+            cursor: pointer;
+            font-size: 0.72rem;
+            padding: 0;
+            font-family: inherit;
+        }
+        .reply-delete-btn:hover {
+            color: #5c0612;
+            text-decoration: underline;
+        }
+        .feed-screen.night-tides .reply-delete-btn {
+            color: #b5a880;
+        }
+        .feed-screen.night-tides .reply-delete-btn:hover {
+            color: #ffcbd2;
         }
         .feed-screen.night-tides .reply-meta { color: #b5a880; }
 
@@ -1831,6 +1856,12 @@
             database.ref('posts/' + postKey + '/whispers/' + whisperKey).remove();
         }
 
+        function deleteReply(postKey, whisperKey, replyKey, event) {
+            if (event) event.stopPropagation();
+            if (!confirm('Delete this reply?')) return;
+            database.ref('posts/' + postKey + '/whispers/' + whisperKey + '/replies/' + replyKey).remove();
+        }
+
         function submitWhisperReply(postKey, whisperKey, inputId, event, asAdmin = false) {
             if (event) {
                 event.preventDefault();
@@ -2597,9 +2628,14 @@
                                             ${replies.map(reply => {
                                                 const isAdminReply = Boolean(reply.isAdmin || reply.user === 'admin' || reply.user === 'official');
                                                 const replyName = isAdminReply ? 'admin reply' : '@' + (reply.user || 'unknown');
+                                                const canDelete = isAdminLoggedIn || (reply.user && String(reply.user).toLowerCase() === String(claimedSoulTag || '').toLowerCase());
+                                                const replyKey = Object.keys(w.replies).find(key => w.replies[key] === reply);
                                                 return `
                                                     <div class="reply-bubble">
-                                                        <div class="reply-meta">${replyName}${isAdminReply ? '<span class="admin-badge">👑 official</span>' : ''} • ${new Date(reply.timestamp || Date.now()).toLocaleString()}</div>
+                                                        <div class="reply-meta">
+                                                            <span>${replyName}${isAdminReply ? '<span class="admin-badge">👑 official</span>' : ''} • ${new Date(reply.timestamp || Date.now()).toLocaleString()}</span>
+                                                            ${canDelete && replyKey ? `<button type="button" class="reply-delete-btn" onclick="deleteReply('${post.fbKey}', '${whisperKey}', '${replyKey}', event)">delete</button>` : ''}
+                                                        </div>
                                                         <div>${reply.text}</div>
                                                     </div>
                                                 `;
