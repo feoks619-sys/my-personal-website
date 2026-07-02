@@ -2603,6 +2603,8 @@
                         const bubbleBg = getAvatarColor(userHandle);
                         const replies = w.replies ? Object.values(w.replies) : [];
                         const normalizedHandle = userHandle.toLowerCase();
+                        const normalizedCurrentTag = String(claimedSoulTag || '').trim().toLowerCase();
+                        const canDeleteWhisper = isAdminLoggedIn || (w.user && String(w.user).trim().toLowerCase() === normalizedCurrentTag);
                         const isBanned = Boolean(moderationState.bannedUsers[normalizedHandle]);
                         const replyInputId = `reply-input-${post.fbKey}-${whisperKey}`;
                         const replyPlaceholder = isAdminLoggedIn ? 'reply as admin...' : 'reply to this comment...';
@@ -2614,10 +2616,10 @@
                                     <span class="whisper-user">@${userHandle}</span>
                                     <span class="whisper-text">${w.text}</span>
                                     <div class="comment-time">${new Date(w.timestamp || Date.now()).toLocaleString()}</div>
-                                    ${isAdminLoggedIn ? `
+                                    ${isAdminLoggedIn || canDeleteWhisper ? `
                                         <div class="whisper-admin-actions">
-                                            <button type="button" onclick="deleteWhisper('${post.fbKey}', '${whisperKey}', event)">delete</button>
-                                            ${isBanned ? `<button type="button" onclick="unbanUser('${userHandle}', event)">unban</button>` : `<button type="button" onclick="banUser('${userHandle}', 'moderated by admin', event)">ban</button>`}
+                                            ${canDeleteWhisper ? `<button type="button" onclick="deleteWhisper('${post.fbKey}', '${whisperKey}', event)">delete</button>` : ""}
+                                            ${isAdminLoggedIn ? (isBanned ? `<button type="button" onclick="unbanUser('${userHandle}', event)">unban</button>` : `<button type="button" onclick="banUser('${userHandle}', 'moderated by admin', event)">ban</button>`) : ""}
                                         </div>` : ""}
                                     <div class="reply-input-row">
                                         <input type="text" id="${replyInputId}" placeholder="${replyPlaceholder}">
@@ -2628,7 +2630,7 @@
                                             ${replies.map(reply => {
                                                 const isAdminReply = Boolean(reply.isAdmin || reply.user === 'admin' || reply.user === 'official');
                                                 const replyName = isAdminReply ? 'admin reply' : '@' + (reply.user || 'unknown');
-                                                const canDelete = isAdminLoggedIn || (reply.user && String(reply.user).toLowerCase() === String(claimedSoulTag || '').toLowerCase());
+                                                const canDelete = isAdminLoggedIn || (reply.user && String(reply.user).trim().toLowerCase() === normalizedCurrentTag);
                                                 const replyKey = Object.keys(w.replies).find(key => w.replies[key] === reply);
                                                 return `
                                                     <div class="reply-bubble">
