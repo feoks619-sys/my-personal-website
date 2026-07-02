@@ -812,7 +812,7 @@
             to { opacity: 1; transform: translateY(0); }
         }
 
-        .post-time { font-size: 0.8rem; color: #a39683; margin-bottom: 15px; }
+        .post-time { font-size: 0.8rem; color: #a39683; margin-bottom: 15px; padding-right: 120px; }
         .feed-screen.night-tides .post-time { color: #b5a880; }
         
         .post-content { font-size: 1.1rem; line-height: 1.6; margin-bottom: 20px; white-space: pre-wrap; }
@@ -820,20 +820,74 @@
         .feed-screen.night-tides .post-media { border-color: #5c0612; }
 
         .card-admin-btn {
-            display: none; 
+            display: none;
             position: absolute;
-            top: 25px;
-            right: 25px;
-            background: none;
-            border: none;
-            color: #b5a880;
+            top: 8px;
+            right: -4px;
+            background: rgba(255, 253, 245, 0.95);
+            border: 1px solid #e6dfbd;
+            border-radius: 999px;
+            padding: 5px 8px;
+            color: #5c0612;
             font-family: inherit;
-            font-size: 0.8rem;
+            font-size: 0.76rem;
             cursor: pointer;
-            letter-spacing: 1px;
+            letter-spacing: 0.4px;
+            box-shadow: 0 4px 10px rgba(92,6,18,0.08);
+            z-index: 2;
+            white-space: nowrap;
         }
-        .card-admin-btn:hover { color: #5c0612; text-decoration: underline; }
+        .card-admin-btn:hover { color: #5c0612; transform: translateY(-1px); }
+        .feed-screen.night-tides .card-admin-btn {
+            background: rgba(28, 2, 5, 0.95);
+            border-color: #3d050c;
+            color: #fefae0;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.25);
+        }
         .feed-screen.night-tides .card-admin-btn:hover { color: #eae6df; }
+
+        .post-edit-box {
+            margin: 10px 0 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .post-edit-box textarea {
+            width: 100%;
+            min-height: 90px;
+            border: 1px solid #e6dfbd;
+            border-radius: 10px;
+            padding: 10px 12px;
+            font-family: inherit;
+            font-size: 0.95rem;
+            resize: vertical;
+            background: #fdfbf7;
+            color: #4a3f35;
+        }
+        .feed-screen.night-tides .post-edit-box textarea {
+            background: #0f0102;
+            border-color: #3d050c;
+            color: #fefae0;
+        }
+        .post-edit-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .post-edit-actions button {
+            border: none;
+            border-radius: 999px;
+            padding: 6px 10px;
+            font-family: inherit;
+            font-size: 0.75rem;
+            cursor: pointer;
+            background: #5c0612;
+            color: #fffdec;
+        }
+        .post-edit-actions button.secondary {
+            background: #a39683;
+        }
+        .feed-screen.night-tides .post-edit-actions button { background: #b5a880; color: #1c0205; }
+        .feed-screen.night-tides .post-edit-actions button.secondary { background: #6b5d44; color: #fefae0; }
 
         .post-actions {
             display: flex;
@@ -1457,6 +1511,8 @@
         let globalPostsCache = [];
         let clickCount = 0;
         let moderationState = { bannedUsers: {}, commentCounts: {} };
+        let editingPostKey = null;
+        let editingPostDraft = "";
 
         // Unique local fingerprint generated per browser installation to stop like spams globally
         if (!localStorage.getItem('archive_fingerprint')) {
@@ -1504,6 +1560,15 @@
                     commentCounts: data.commentCounts || {}
                 };
             });
+        }
+
+        function escapeHtml(value) {
+            return String(value || "")
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
         }
 
         // Generates an attractive avatar accent color based on user nickname strings automatically
@@ -2526,6 +2591,45 @@
             database.ref('posts/' + key).update({ visibility: "live" });
         }
 
+        function editPost(key, event) {
+            if (event) event.stopPropagation();
+            if (!isAdminLoggedIn) return;
+
+            const post = globalPostsCache.find(item => item.fbKey === key);
+            editingPostKey = key;
+            editingPostDraft = (post && post.text) ? post.text : "";
+            renderStream();
+        }
+
+        function cancelEditPost(event) {
+            if (event) event.stopPropagation();
+            editingPostKey = null;
+            editingPostDraft = "";
+            renderStream();
+        }
+
+        function saveEditedPost(key, event) {
+            if (event) event.stopPropagation();
+            const trimmedText = (editingPostDraft || "").trim();
+            if (!trimmedText) {
+                alert("Post content cannot be empty.");
+                return;
+            }
+
+            database.ref('posts/' + key).update({ text: trimmedText }).then(() => {
+                editingPostKey = null;
+                editingPostDraft = "";
+                renderStream();
+            });
+        }
+
+        function deletePost(key, event) {
+            if (event) event.stopPropagation();
+            if (!isAdminLoggedIn) return;
+            if (!confirm("Remove this post from the feed without archiving it?")) return;
+            database.ref('posts/' + key).update({ visibility: "deleted" });
+        }
+
         function burnPostImmediate(key, event) {
             event.stopPropagation();
             if(confirm("Are you absolutely sure you want to completely erase this memory fragment from existence?")) {
@@ -2567,14 +2671,18 @@
                     if (currentView === "live") {
                         adminActionControls = `
                             <div class="card-admin-btn" style="display:block;">
-                                <span onclick="archivePost('${post.fbKey}', event)">[ archive ]</span> • 
-                                <span style="color:#bc4749;" onclick="burnPostImmediate('${post.fbKey}', event)">[ burn ]</span>
+                                <span onclick="editPost('${post.fbKey}', event)">🖉 edit</span> • 
+                                <span onclick="deletePost('${post.fbKey}', event)">🗑 delete</span> • 
+                                <span onclick="archivePost('${post.fbKey}', event)">🗄 archive</span> • 
+                                <span style="color:#bc4749;" onclick="burnPostImmediate('${post.fbKey}', event)">🔥 burn</span>
                             </div>`;
                     } else {
                         adminActionControls = `
                             <div class="card-admin-btn" style="display:block;">
-                                <span onclick="restorePost('${post.fbKey}', event)">[ unarchive ]</span> • 
-                                <span style="color:#bc4749;" onclick="burnPostImmediate('${post.fbKey}', event)">[ burn ]</span>
+                                <span onclick="editPost('${post.fbKey}', event)">🖉 edit</span> • 
+                                <span onclick="deletePost('${post.fbKey}', event)">🗑 delete</span> • 
+                                <span onclick="restorePost('${post.fbKey}', event)">🗂 unarchive</span> • 
+                                <span style="color:#bc4749;" onclick="burnPostImmediate('${post.fbKey}', event)">🔥 burn</span>
                             </div>`;
                     }
                 }
@@ -2651,11 +2759,20 @@
                 }
 
                 const uniqueInputId = `input-field-${post.fbKey}`;
+                const isEditingThisPost = editingPostKey === post.fbKey;
+                const editBoxHTML = isEditingThisPost ? `
+                    <div class="post-edit-box">
+                        <textarea id="edit-text-${post.fbKey}" oninput="editingPostDraft = this.value">${escapeHtml(editingPostDraft)}</textarea>
+                        <div class="post-edit-actions">
+                            <button type="button" onclick="saveEditedPost('${post.fbKey}', event)">save</button>
+                            <button type="button" class="secondary" onclick="cancelEditPost(event)">cancel</button>
+                        </div>
+                    </div>` : "";
 
                 card.innerHTML = `
                     ${adminActionControls}
                     <div class="post-time">${post.date} • ${post.timeStamp}</div>
-                    <div class="post-content">${post.text}</div>
+                    ${isEditingThisPost ? editBoxHTML : `<div class="post-content">${post.text}</div>`}
                     ${mediaHTML}
                     <div class="post-actions">
                         <div class="actions-row">
