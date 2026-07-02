@@ -872,21 +872,31 @@
         .heart-btn:hover { transform: scale(1.1); }
         .heart-btn.liked { color: #5c0612 !important; font-weight: bold; }
         .feed-screen.night-tides .heart-btn.liked { color: #ffcbd2 !important; }
+        .heart-btn.bursting {
+            animation: heartPopPulse 0.35s ease-out;
+        }
 
         .pop-heart {
             position: absolute;
             color: #5c0612;
-            font-size: 1.8rem;
+            font-size: 1.4rem;
             pointer-events: none;
             z-index: 99;
-            animation: floatUpBurst 0.8s cubic-bezier(0.18, 0.89, 0.32, 1.28) forwards;
+            animation: floatUpBurst 0.85s cubic-bezier(0.18, 0.89, 0.32, 1.28) forwards;
+            filter: drop-shadow(0 4px 8px rgba(0,0,0,0.15));
         }
         .feed-screen.night-tides .pop-heart { color: #ffcbd2; }
 
+        @keyframes heartPopPulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.16); }
+            100% { transform: scale(1); }
+        }
+
         @keyframes floatUpBurst {
-            0% { transform: translate(0, 0) scale(0.5) rotate(0deg); opacity: 0; }
-            15% { opacity: 1; transform: translate(0, -15px) scale(1.4) rotate(-15deg); }
-            100% { transform: translate(var(--x-drift), -80px) scale(0.8) rotate(var(--r-drift)); opacity: 0; }
+            0% { transform: translate(0, 0) scale(0.25) rotate(0deg); opacity: 0; }
+            20% { opacity: 1; transform: translate(0, -12px) scale(1.05) rotate(-10deg); }
+            100% { transform: translate(var(--x-drift), var(--y-drift)) scale(0.2) rotate(var(--r-drift)); opacity: 0; }
         }
 
         /* ── MOBILE INPUT + ARROW CONTAINER ── */
@@ -1776,17 +1786,27 @@
                     database.ref('posts/' + fbKey + '/voterRegistry').push(likeRecord);
                     currentLikes += 1;
 
-                    const pop = document.createElement('div');
-                    pop.classList.add('pop-heart');
-                    pop.innerHTML = "♥";
-                    const xDrift = (Math.random() * 60 - 30) + "px";
-                    const rDrift = (Math.random() * 40 - 20) + "deg";
-                    pop.style.setProperty('--x-drift', xDrift);
-                    pop.style.setProperty('--r-drift', rDrift);
-                    pop.style.left = (button.offsetLeft + 10) + "px";
-                    pop.style.top = (button.offsetTop - 15) + "px";
-                    button.parentElement.appendChild(pop);
-                    setTimeout(() => { pop.remove(); }, 800);
+                    button.classList.add('bursting');
+                    setTimeout(() => { button.classList.remove('bursting'); }, 350);
+
+                    const burstCount = 7;
+                    for (let i = 0; i < burstCount; i++) {
+                        const pop = document.createElement('div');
+                        pop.classList.add('pop-heart');
+                        pop.innerHTML = i % 2 === 0 ? '♥' : '♡';
+
+                        const xDrift = ((i % 3) - 1) * 34 + (Math.random() * 16 - 8) + "px";
+                        const yDrift = (-60 - (i * 8) + (Math.random() * 10 - 5)) + "px";
+                        const rDrift = (Math.random() * 80 - 40) + "deg";
+                        pop.style.setProperty('--x-drift', xDrift);
+                        pop.style.setProperty('--y-drift', yDrift);
+                        pop.style.setProperty('--r-drift', rDrift);
+                        pop.style.left = (button.offsetLeft + button.offsetWidth / 2 - 8) + "px";
+                        pop.style.top = (button.offsetTop - 8) + "px";
+                        pop.style.fontSize = `${1.1 + Math.random() * 0.3}rem`;
+                        button.parentElement.appendChild(pop);
+                        setTimeout(() => { pop.remove(); }, 900);
+                    }
                 } else {
                     // Remove any registry entries that match our fingerprint (object or raw string)
                     Object.keys(registryData).forEach(rk => {
