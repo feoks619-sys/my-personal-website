@@ -5,7 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>The Archive</title>
     
-    <script src="https://unpkg.com/typed.js@2.1.0/dist/typed.umd.js"></script>
+    <!-- Prevent aggressive caching so mobile devices pick up updates quickly -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <!-- Bump the typed.js query to force reload when we update the page -->
+    <script src="https://unpkg.com/typed.js@2.1.0/dist/typed.umd.js?v=2"></script>
 
     <style>
         /* BASE STYLE: Deep Bleachers Red */
