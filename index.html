@@ -1520,10 +1520,38 @@
         let isAdminLoggedIn = false;
         let currentView = "live"; 
         let globalPostsCache = [];
+        let listenerSeenData = false;
         let clickCount = 0;
         let moderationState = { bannedUsers: {}, commentCounts: {} };
         let editingPostKey = null;
         let editingPostDraft = "";
+
+        function normalizePostsPayload(data) {
+            if (!data || typeof data !== 'object') {
+                return [];
+            }
+            return Object.keys(data).map(key => ({ fbKey: key, ...data[key] }));
+        }
+
+        function fetchPostsViaRest() {
+            if (!firebaseConfig || !firebaseConfig.databaseURL) return;
+            const url = firebaseConfig.databaseURL.replace(/\/+$|\s+$/, '') + '/posts.json';
+            fetch(url, { cache: 'no-store' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data && typeof data === 'object' && Object.keys(data).length > 0) {
+                        globalPostsCache = normalizePostsPayload(data);
+                        globalPostsCache.sort((a, b) => b.id - a.id);
+                        console.log('REST fallback loaded posts:', globalPostsCache.length);
+                        renderStream();
+                    } else {
+                        console.log('REST fallback: no posts data returned');
+                    }
+                })
+                .catch(err => {
+                    console.warn('REST fallback error fetching posts:', err);
+                });
+        }
 
         // Unique local fingerprint generated per browser installation to stop like spams globally
         if (!localStorage.getItem('archive_fingerprint')) {
@@ -1554,19 +1582,12 @@
             }
 
             // Living Listener: Automatically triggers UI update across all global devices when data changes
-            console.log('Attempting to attach Firebase posts listener...');
             try {
                 database.ref('posts').on('value', (snapshot) => {
-                    console.log('Firebase posts:on value fired');
+                    listenerSeenData = true;
                     const data = snapshot.val();
-                    globalPostsCache = [];
-                    if (data) {
-                        Object.keys(data).forEach(key => {
-                            globalPostsCache.push({ fbKey: key, ...data[key] });
-                        });
-                        globalPostsCache.sort((a, b) => b.id - a.id);
-                    }
-                    console.log('Global posts cache length:', globalPostsCache.length);
+                    globalPostsCache = normalizePostsPayload(data);
+                    globalPostsCache.sort((a, b) => b.id - a.id);
                     renderStream();
                 });
             } catch (e) {
@@ -1575,23 +1596,9 @@
 
             // Fallback: if listener didn't populate posts (some mobile browsers block SDK), try REST fetch after a short delay
             setTimeout(() => {
-                if (!globalPostsCache || globalPostsCache.length === 0) {
+                if (!listenerSeenData || !globalPostsCache || globalPostsCache.length === 0) {
                     console.warn('No posts from realtime listener — attempting REST fallback');
-                    if (firebaseConfig && firebaseConfig.databaseURL) {
-                        const url = firebaseConfig.databaseURL.replace(/\/+$/, '') + '/posts.json';
-                        fetch(url).then(r => r.json()).then(data => {
-                            if (data) {
-                                globalPostsCache = Object.keys(data).map(k => ({ fbKey: k, ...data[k] }));
-                                globalPostsCache.sort((a, b) => b.id - a.id);
-                                console.log('REST fallback loaded posts:', globalPostsCache.length);
-                                renderStream();
-                            } else {
-                                console.log('REST fallback: no posts data returned');
-                            }
-                        }).catch(err => {
-                            console.warn('REST fallback error fetching posts:', err);
-                        });
-                    }
+                    fetchPostsViaRest();
                 }
             }, 2500);
         };
