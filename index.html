@@ -1544,7 +1544,6 @@
             
             refreshModerationState();
             initializeMessaging();
-            updateNotificationButtonState();
             if (Notification.permission === 'granted') {
                 getFcmToken();
             }
@@ -1570,6 +1569,50 @@
                     bannedUsers: data.bannedUsers || {},
                     commentCounts: data.commentCounts || {}
                 };
+            });
+        }
+
+        function initializeMessaging() {
+            if (typeof firebase === 'undefined' || !firebase.messaging) {
+                console.warn('Firebase Messaging is not available.');
+                return;
+            }
+            try {
+                messaging = firebase.messaging();
+            } catch (e) {
+                console.warn('Unable to initialize Firebase Messaging:', e);
+            }
+        }
+
+        function getFcmToken() {
+            if (!messaging || !messaging.getToken) {
+                return Promise.resolve(fcmToken);
+            }
+            return messaging.getToken({ vapidKey: firebaseMessagingPublicKey })
+                .then(token => {
+                    fcmToken = token;
+                    localStorage.setItem('archive_fcm_token', token);
+                    return token;
+                })
+                .catch((err) => {
+                    console.warn('Unable to retrieve FCM token:', err);
+                    return fcmToken;
+                });
+        }
+
+        function requestNotificationPermission() {
+            if (!('Notification' in window)) {
+                alert('Notifications are not supported by this browser.');
+                return;
+            }
+            Notification.requestPermission().then(permission => {
+                if (permission === 'granted') {
+                    getFcmToken().then(() => {
+                        alert('Post alerts enabled.');
+                    });
+                } else {
+                    alert('Notification permission denied.');
+                }
             });
         }
 
@@ -1830,6 +1873,7 @@
         }
 
         function showFeed() {
+            currentView = "live";
             document.getElementById('text-gate').style.display = 'none';
             document.getElementById('feed-screen').style.display = 'flex';
             
@@ -2536,7 +2580,7 @@
                 timeStamp: timeStr,
                 text: content,
                 likes: 0,
-                visibility: currentView
+                visibility: "live"
             };
 
             if (fileInput.files.length > 0) {
