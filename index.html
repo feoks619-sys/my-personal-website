@@ -1931,12 +1931,16 @@
 
         function showFeed() {
             currentView = "live";
+            document.getElementById('main-gate').style.display = 'none';
+            document.getElementById('main-text').style.display = 'none';
             document.getElementById('text-gate').style.display = 'none';
             document.getElementById('feed-screen').style.display = 'flex';
             
             // If they haven't picked a profile name yet, intercept them with the portal
             if (!claimedSoulTag) {
                 document.getElementById('identity-portal').classList.add('show');
+            } else {
+                document.getElementById('identity-portal').classList.remove('show');
             }
             renderStream();
         }
