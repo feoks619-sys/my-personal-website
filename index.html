@@ -1385,6 +1385,7 @@
                 <input type="text" id="nickname-edit" maxlength="15" placeholder="change nickname" value="">
                 <button type="button" onclick="updateUserNickname()">save tag</button>
                 <button type="button" onclick="clearUserData()">clear data</button>
+                <button id="notify-permission-btn" type="button" onclick="requestNotificationPermission()">enable post alerts</button>
             </div>
             <span id="theme-toggle-text" class="mode-link" onclick="toggleNightTides()">// toggle night tides</span>
         </div>
@@ -1489,6 +1490,7 @@
 
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-messaging.js"></script>
 
     <script>
         // 🛠️ YOUR OFFICIAL FIREBASE CONFIGURATION:
@@ -1505,6 +1507,10 @@
         // Initialize Firebase Network Connection
         firebase.initializeApp(firebaseConfig);
         const database = firebase.database();
+
+        const firebaseMessagingPublicKey = 'BIIMqkTstuf5ZzCxdkSXuhXedac6J6vhJDEptOLOqo2Oo7MzvahF7GVmEBUJczci6wo5zvCC2wndM9FdIa0nQX0';
+        let messaging = null;
+        let fcmToken = localStorage.getItem('archive_fcm_token') || "";
 
         let isAdminLoggedIn = false;
         let currentView = "live"; 
@@ -1537,6 +1543,11 @@
             }
             
             refreshModerationState();
+            initializeMessaging();
+            updateNotificationButtonState();
+            if (Notification.permission === 'granted') {
+                getFcmToken();
+            }
 
             // Living Listener: Automatically triggers UI update across all global devices when data changes
             database.ref('posts').on('value', (snapshot) => {
