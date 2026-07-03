@@ -1370,6 +1370,15 @@
         </div>
     </div>
 
+    <!-- Debug banner (temporary) -->
+    <div id="debug-banner" style="position:fixed;right:12px;top:12px;z-index:99999;background:rgba(0,0,0,0.6);color:#fff;padding:8px 10px;border-radius:8px;font-size:13px;font-family:monospace;">
+        <div><strong>Debug</strong></div>
+        <div id="dbg-posts">Posts: ?</div>
+        <div id="dbg-listener">Listener: ?</div>
+        <div id="dbg-rest">REST: ?</div>
+        <div id="dbg-last">Last: -</div>
+    </div>
+
     <div id="main-text" class="overlay-content">
         <h1>Glad you found me.</h1>
         <button class="enter-btn" onclick="startEverything()">[ open with care ]</button>
@@ -1567,10 +1576,14 @@
                         globalPostsCache.sort((a, b) => b.id - a.id);
                     }
                     console.log('Global posts cache length:', globalPostsCache.length);
+                    try { document.getElementById('dbg-posts').innerText = 'Posts: ' + globalPostsCache.length; } catch(e){}
+                    try { document.getElementById('dbg-listener').innerText = 'Listener: yes'; } catch(e){}
+                    try { document.getElementById('dbg-last').innerText = 'Last: ' + new Date().toLocaleTimeString(); } catch(e){}
                     renderStream();
                 });
             } catch (e) {
                 console.warn('Error attaching Firebase listener:', e);
+                try { document.getElementById('dbg-listener').innerText = 'Listener: error'; } catch(e){}
             }
 
             // Fallback: if listener didn't populate posts (some mobile browsers block SDK), try REST fetch after a short delay
@@ -1584,12 +1597,17 @@
                                 globalPostsCache = Object.keys(data).map(k => ({ fbKey: k, ...data[k] }));
                                 globalPostsCache.sort((a, b) => b.id - a.id);
                                 console.log('REST fallback loaded posts:', globalPostsCache.length);
+                                try { document.getElementById('dbg-posts').innerText = 'Posts: ' + globalPostsCache.length; } catch(e){}
+                                try { document.getElementById('dbg-rest').innerText = 'REST: yes'; } catch(e){}
+                                try { document.getElementById('dbg-last').innerText = 'Last: ' + new Date().toLocaleTimeString(); } catch(e){}
                                 renderStream();
                             } else {
                                 console.log('REST fallback: no posts data returned');
+                                try { document.getElementById('dbg-rest').innerText = 'REST: empty'; } catch(e){}
                             }
                         }).catch(err => {
                             console.warn('REST fallback error fetching posts:', err);
+                            try { document.getElementById('dbg-rest').innerText = 'REST: error'; } catch(e){}
                         });
                     }
                 }
