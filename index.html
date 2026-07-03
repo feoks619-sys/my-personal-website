@@ -1618,10 +1618,26 @@
                 console.warn('Firebase Messaging is not available.');
                 return;
             }
+            if (!('serviceWorker' in navigator)) {
+                console.warn('Service Worker is not supported in this browser; disabling messaging.');
+                return;
+            }
             try {
                 messaging = firebase.messaging();
+                navigator.serviceWorker.register('firebase-messaging-sw.js')
+                    .then((registration) => {
+                        if (messaging && typeof messaging.useServiceWorker === 'function') {
+                            messaging.useServiceWorker(registration);
+                            console.log('Firebase Messaging registered service worker:', registration.scope);
+                        }
+                    })
+                    .catch((err) => {
+                        console.warn('Unable to register Firebase Messaging service worker:', err);
+                        messaging = null;
+                    });
             } catch (e) {
                 console.warn('Unable to initialize Firebase Messaging:', e);
+                messaging = null;
             }
         }
 
