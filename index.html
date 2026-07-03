@@ -1554,17 +1554,46 @@
             }
 
             // Living Listener: Automatically triggers UI update across all global devices when data changes
-            database.ref('posts').on('value', (snapshot) => {
-                const data = snapshot.val();
-                globalPostsCache = [];
-                if (data) {
-                    Object.keys(data).forEach(key => {
-                        globalPostsCache.push({ fbKey: key, ...data[key] });
-                    });
-                    globalPostsCache.sort((a, b) => b.id - a.id);
+            console.log('Attempting to attach Firebase posts listener...');
+            try {
+                database.ref('posts').on('value', (snapshot) => {
+                    console.log('Firebase posts:on value fired');
+                    const data = snapshot.val();
+                    globalPostsCache = [];
+                    if (data) {
+                        Object.keys(data).forEach(key => {
+                            globalPostsCache.push({ fbKey: key, ...data[key] });
+                        });
+                        globalPostsCache.sort((a, b) => b.id - a.id);
+                    }
+                    console.log('Global posts cache length:', globalPostsCache.length);
+                    renderStream();
+                });
+            } catch (e) {
+                console.warn('Error attaching Firebase listener:', e);
+            }
+
+            // Fallback: if listener didn't populate posts (some mobile browsers block SDK), try REST fetch after a short delay
+            setTimeout(() => {
+                if (!globalPostsCache || globalPostsCache.length === 0) {
+                    console.warn('No posts from realtime listener — attempting REST fallback');
+                    if (firebaseConfig && firebaseConfig.databaseURL) {
+                        const url = firebaseConfig.databaseURL.replace(/\/+$/, '') + '/posts.json';
+                        fetch(url).then(r => r.json()).then(data => {
+                            if (data) {
+                                globalPostsCache = Object.keys(data).map(k => ({ fbKey: k, ...data[k] }));
+                                globalPostsCache.sort((a, b) => b.id - a.id);
+                                console.log('REST fallback loaded posts:', globalPostsCache.length);
+                                renderStream();
+                            } else {
+                                console.log('REST fallback: no posts data returned');
+                            }
+                        }).catch(err => {
+                            console.warn('REST fallback error fetching posts:', err);
+                        });
+                    }
                 }
-                renderStream();
-            });
+            }, 2500);
         };
 
         function refreshModerationState() {
