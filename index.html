@@ -1916,6 +1916,8 @@
         }
 
         function startEverything() {
+            document.getElementById('main-gate').style.display = 'none';
+            document.getElementById('main-text').style.display = 'none';
             document.getElementById('text-gate').classList.add('show');
             setInterval(createLeaf, 380); 
             setTimeout(() => {
@@ -1935,6 +1937,10 @@
             document.getElementById('main-text').style.display = 'none';
             document.getElementById('text-gate').style.display = 'none';
             document.getElementById('feed-screen').style.display = 'flex';
+            if (!listenerSeenData && (!globalPostsCache || globalPostsCache.length === 0)) {
+                console.log('showFeed: no realtime data yet, fetching posts via REST fallback');
+                fetchPostsViaRest();
+            }
             
             // If they haven't picked a profile name yet, intercept them with the portal
             if (!claimedSoulTag) {
