@@ -286,6 +286,7 @@
         .dm-messages {
             flex: 1;
             overflow-y: auto;
+            overscroll-behavior: contain;
             padding: 16px;
             display: flex;
             flex-direction: column;
@@ -917,6 +918,7 @@
         .admin-dm-thread-body {
             flex: 1;
             overflow-y: auto;
+            overscroll-behavior: contain;
             padding: 10px 12px;
             display: flex;
             flex-direction: column;
@@ -2018,6 +2020,8 @@
         let selectedDmKey = null;
         let directMessagesCache = [];
         let dmEditState = { conversationKey: null, messageKey: null, draft: '' };
+        let dmOverlayVisible = false;
+        let adminDmSidebarVisible = false;
         let adminDmPendingAttachment = null;
         let adminDmPendingAttachmentType = null;
         let adminDmPendingAttachmentName = "";
@@ -2075,6 +2079,12 @@
                 .replace(/>/g, '&gt;')
                 .replace(/"/g, '&quot;')
                 .replace(/'/g, '&#39;');
+        }
+
+        function syncPageScrollLock() {
+            const shouldLock = dmOverlayVisible || adminDmSidebarVisible;
+            document.body.style.overflow = shouldLock ? 'hidden' : '';
+            document.documentElement.style.overflow = shouldLock ? 'hidden' : '';
         }
 
         const officialAdminName = 'The Keeper';
@@ -2319,6 +2329,8 @@
             }
             const overlay = document.getElementById('direct-message-overlay');
             if (!overlay) return;
+            dmOverlayVisible = true;
+            syncPageScrollLock();
             overlay.classList.add('show');
             loadDirectMessages();
             setTimeout(() => {
@@ -2330,6 +2342,8 @@
         function closeDirectMessages() {
             const overlay = document.getElementById('direct-message-overlay');
             if (!overlay) return;
+            dmOverlayVisible = false;
+            syncPageScrollLock();
             overlay.classList.remove('show');
         }
 
@@ -3312,6 +3326,8 @@
             const panel = document.getElementById('admin-dm-sidebar');
             if (!panel) return;
             const open = panel.classList.toggle('open');
+            adminDmSidebarVisible = open;
+            syncPageScrollLock();
             panel.setAttribute('aria-hidden', String(!open));
             if (open) {
                 loadAdminDmInbox();
