@@ -939,6 +939,9 @@
             background: rgba(255,248,220,0.8);
         }
         .admin-dm-conversation-item {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 8px;
             width: 100%;
             text-align: left;
             border: 1px solid rgba(181, 123, 22, 0.16);
@@ -952,6 +955,15 @@
         .admin-dm-conversation-item.active {
             border-color: #b57b16;
             background: #ffe8b0;
+        }
+        .admin-dm-conversation-item .admin-dm-unread-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #3578f6;
+            align-self: center;
+            justify-self: end;
+            box-shadow: 0 0 0 1px rgba(53,120,246,0.16);
         }
         .admin-dm-conversation-name {
             font-size: 0.82rem;
@@ -3376,6 +3388,25 @@
             return new Date(value).toLocaleString();
         }
 
+        function getDmLastSeenKey(conversationKey) {
+            return 'dm_lastSeen_' + conversationKey;
+        }
+
+        function updateDmConversationLastSeen(conversationKey, timestamp) {
+            if (!conversationKey || !timestamp) return;
+            try {
+                localStorage.setItem(getDmLastSeenKey(conversationKey), String(timestamp));
+            } catch (e) {
+                console.warn('Could not store DM last seen state', e);
+            }
+        }
+
+        function hasDmConversationUnread(conversation) {
+            if (!conversation || !conversation.lastUserMessageTimestamp) return false;
+            const lastSeen = parseInt(localStorage.getItem(getDmLastSeenKey(conversation.key)) || '0', 10);
+            return conversation.lastUserMessageTimestamp > lastSeen;
+        }
+
         function renderDmInbox(conversations) {
             const list = document.getElementById('admin-dm-list');
             const header = document.getElementById('admin-dm-thread-header');
@@ -3392,16 +3423,25 @@
             list.innerHTML = conversations.map(entry => {
                 const previewText = (entry.lastMessageText || 'shared a memory').replace(/\s+/g, ' ').trim();
                 const isActive = entry.key === selectedDmKey;
+                const unreadDot = hasDmConversationUnread(entry) ? '<span class="admin-dm-unread-dot" aria-label="unread message"></span>' : '';
                 return `
                     <button type="button" class="admin-dm-conversation-item ${isActive ? 'active' : ''}" onclick="openDmConversation('${entry.key}')">
                         <div class="admin-dm-conversation-name">${escapeHtml(entry.displayName || entry.key)}</div>
                         <div class="admin-dm-conversation-preview">${escapeHtml(previewText)}</div>
+                        ${unreadDot}
                     </button>
                 `;
             }).join('');
 
             if (!selectedDmKey && conversations.length > 0) {
                 selectedDmKey = conversations[0].key;
+            }
+
+            if (selectedDmKey) {
+                const selectedConversation = conversations.find(item => item.key === selectedDmKey);
+                if (selectedConversation) {
+                    updateDmConversationLastSeen(selectedConversation.key, selectedConversation.lastUserMessageTimestamp || Date.now());
+                }
             }
 
             const activeConversation = conversations.find(item => item.key === selectedDmKey) || conversations[0];
@@ -3467,6 +3507,10 @@
 
         function openDmConversation(key) {
             selectedDmKey = key;
+            const currentConversation = dmInboxConversations.find(item => item.key === key);
+            if (currentConversation) {
+                updateDmConversationLastSeen(currentConversation.key, currentConversation.lastUserMessageTimestamp || Date.now());
+            }
             renderDmInbox(dmInboxConversations);
         }
 
@@ -3527,7 +3571,9 @@
                     const messages = messageEntries.map(([messageKey, value]) => ({ fbKey: messageKey, ...value }));
                     const sortedMessages = messages.slice().sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
                     const lastMessage = sortedMessages[sortedMessages.length - 1] || null;
-                    const participantMessage = sortedMessages.find(message => message.from === 'user');
+                    const userMessages = sortedMessages.filter(message => message.from === 'user');
+                    const lastUserMessage = userMessages[userMessages.length - 1] || null;
+                    const participantMessage = userMessages[0] || sortedMessages.find(message => message.from === 'user');
                     return {
                         key,
                         displayName: (participantMessage && participantMessage.userTag) ? participantMessage.userTag : key,
@@ -3535,6 +3581,7 @@
                             ...message,
                             timestampText: message.timestamp ? new Date(message.timestamp).toLocaleString() : ''
                         })),
+                        lastUserMessageTimestamp: lastUserMessage ? (lastUserMessage.timestamp || 0) : 0,
                         lastMessageText: lastMessage ? (lastMessage.deleted ? 'deleted message' : lastMessage.text || (lastMessage.mediaType === 'image' ? '[photo]' : lastMessage.mediaType === 'audio' ? '[voicemail]' : '')) : 'No messages yet',
                         lastMessageTime: lastMessage && lastMessage.timestamp ? new Date(lastMessage.timestamp).toLocaleString() : ''
                     };
