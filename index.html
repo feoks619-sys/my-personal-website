@@ -1978,11 +1978,11 @@
                 <div class="admin-dm-attachment-row">
                     <label class="admin-dm-attach-btn">
                         📷 photo
-                        <input id="admin-dm-photo-input" type="file" accept="image/*" onchange="handleAdminDmAttachmentSelect('image')" style="display:none;">
+                        <input id="admin-dm-photo-input" type="file" accept="image/*" multiple onchange="handleAdminDmAttachmentSelect('image')" style="display:none;">
                     </label>
                     <label class="admin-dm-attach-btn">
                         🎙️ voicemail
-                        <input id="admin-dm-audio-input" type="file" accept="audio/*" onchange="handleAdminDmAttachmentSelect('audio')" style="display:none;">
+                        <input id="admin-dm-audio-input" type="file" accept="audio/*" multiple onchange="handleAdminDmAttachmentSelect('audio')" style="display:none;">
                     </label>
                     <div id="admin-dm-attachment-name" class="admin-dm-attachment-name">No attachment</div>
                 </div>
@@ -2014,11 +2014,11 @@
             <div class="dm-attachment-row">
                 <label class="dm-attach-btn">
                     📷 photo
-                    <input id="dm-photo-input" type="file" accept="image/*" onchange="handleDmAttachmentSelect('image')" style="display:none;">
+                    <input id="dm-photo-input" type="file" accept="image/*" multiple onchange="handleDmAttachmentSelect('image')" style="display:none;">
                 </label>
                 <label class="dm-attach-btn">
                     🎙️ voicemail
-                    <input id="dm-audio-input" type="file" accept="audio/*" onchange="handleDmAttachmentSelect('audio')" style="display:none;">
+                    <input id="dm-audio-input" type="file" accept="audio/*" multiple onchange="handleDmAttachmentSelect('audio')" style="display:none;">
                 </label>
                 <div id="dm-attachment-name" class="dm-attachment-name">No attachment</div>
             </div>
@@ -2061,9 +2061,9 @@
         let fcmToken = localStorage.getItem('archive_fcm_token') || "";
 
         let isAdminLoggedIn = false;
-        let dmPendingAttachment = null;
+        let dmPendingAttachments = [];
         let dmPendingAttachmentType = null;
-        let dmPendingAttachmentName = "";
+        let dmPendingAttachmentNames = [];
         let dmMessagesRef = null;
         let dmMessagesListener = null;
         let currentView = "live"; 
@@ -2080,9 +2080,9 @@
         let dmOverlayVisible = false;
         let adminDmSidebarVisible = false;
         let dmLongPressTimer = null;
-        let adminDmPendingAttachment = null;
+        let adminDmPendingAttachments = [];
         let adminDmPendingAttachmentType = null;
-        let adminDmPendingAttachmentName = "";
+        let adminDmPendingAttachmentNames = [];
 
         function normalizePostsPayload(data) {
             if (!data || typeof data !== 'object') {
@@ -2455,30 +2455,34 @@
 
         function handleDmAttachmentSelect(type) {
             const input = type === 'image' ? document.getElementById('dm-photo-input') : document.getElementById('dm-audio-input');
-            if (!input || !input.files || !input.files[0]) return;
-            const file = input.files[0];
-            dmPendingAttachment = file;
+            if (!input || !input.files || input.files.length === 0) return;
+            const files = Array.from(input.files);
+            dmPendingAttachments = files;
             dmPendingAttachmentType = type;
-            dmPendingAttachmentName = file.name;
+            dmPendingAttachmentNames = files.map(file => file.name);
             const label = document.getElementById('dm-attachment-name');
-            if (label) label.textContent = 'Attached: ' + file.name;
+            if (label) {
+                label.textContent = files.length === 1 ? 'Attached: ' + files[0].name : 'Attached: ' + files.length + ' files';
+            }
         }
 
         function handleAdminDmAttachmentSelect(type) {
             const input = type === 'image' ? document.getElementById('admin-dm-photo-input') : document.getElementById('admin-dm-audio-input');
-            if (!input || !input.files || !input.files[0]) return;
-            const file = input.files[0];
-            adminDmPendingAttachment = file;
+            if (!input || !input.files || input.files.length === 0) return;
+            const files = Array.from(input.files);
+            adminDmPendingAttachments = files;
             adminDmPendingAttachmentType = type;
-            adminDmPendingAttachmentName = file.name;
+            adminDmPendingAttachmentNames = files.map(file => file.name);
             const label = document.getElementById('admin-dm-attachment-name');
-            if (label) label.textContent = 'Attached: ' + file.name;
+            if (label) {
+                label.textContent = files.length === 1 ? 'Attached: ' + files[0].name : 'Attached: ' + files.length + ' files';
+            }
         }
 
         function clearDmAttachment() {
-            dmPendingAttachment = null;
+            dmPendingAttachments = [];
             dmPendingAttachmentType = null;
-            dmPendingAttachmentName = '';
+            dmPendingAttachmentNames = [];
             const label = document.getElementById('dm-attachment-name');
             if (label) label.textContent = 'No attachment';
             const photoInput = document.getElementById('dm-photo-input');
@@ -2488,9 +2492,9 @@
         }
 
         function clearAdminDmAttachment() {
-            adminDmPendingAttachment = null;
+            adminDmPendingAttachments = [];
             adminDmPendingAttachmentType = null;
-            adminDmPendingAttachmentName = '';
+            adminDmPendingAttachmentNames = [];
             const label = document.getElementById('admin-dm-attachment-name');
             if (label) label.textContent = 'No attachment';
             const photoInput = document.getElementById('admin-dm-photo-input');
@@ -2501,7 +2505,7 @@
 
         function saveDirectMessage(text, mediaUrl, mediaType) {
             const key = (claimedSoulTag || localStorage.getItem('archive_soul_tag') || '').trim().toLowerCase();
-            if (!key) return;
+            if (!key) return Promise.reject(new Error('No conversation key'));
             const payload = {
                 from: 'user',
                 userTag: claimedSoulTag || localStorage.getItem('archive_soul_tag') || '',
@@ -2510,7 +2514,7 @@
                 mediaType: mediaType || null,
                 timestamp: Date.now()
             };
-            database.ref('direct_messages/' + key).push(payload).then(() => {
+            return database.ref('direct_messages/' + key).push(payload).then(() => {
                 const input = document.getElementById('dm-input');
                 if (input) input.value = '';
                 clearDmAttachment();
@@ -2526,18 +2530,25 @@
                 alert('Pick a nickname first to send a private whisper.');
                 return;
             }
-            if (!text && !dmPendingAttachment) {
+            if (!text && dmPendingAttachments.length === 0) {
                 alert('Write a message or attach a photo or voicemail first.');
                 return;
             }
-            if (!dmPendingAttachment) {
-                saveDirectMessage(text, '', null);
+            if (dmPendingAttachments.length === 0) {
+                saveDirectMessage(text, '', null).catch(err => {
+                    console.warn('DM send failed:', err);
+                    alert('Your message could not be sent right now.');
+                });
                 return;
             }
-            const storagePath = 'direct_messages/' + key + '/' + Date.now() + '_' + dmPendingAttachmentName.replace(/\s+/g, '_');
-            const uploadTask = firebase.storage().ref(storagePath).put(dmPendingAttachment);
-            uploadTask.then(snapshot => snapshot.ref.getDownloadURL()).then(url => {
-                saveDirectMessage(text, url, dmPendingAttachmentType === 'image' ? 'image' : 'audio');
+            const attachmentType = dmPendingAttachmentType === 'image' ? 'image' : 'audio';
+            Promise.all(dmPendingAttachments.map(file => {
+                const storagePath = 'direct_messages/' + key + '/' + Date.now() + '_' + file.name.replace(/\s+/g, '_');
+                return firebase.storage().ref(storagePath).put(file)
+                    .then(snapshot => snapshot.ref.getDownloadURL())
+                    .then(url => ({ url, mediaType: attachmentType }));
+            })).then(results => {
+                return Promise.all(results.map(result => saveDirectMessage(text, result.url, result.mediaType)));
             }).catch(err => {
                 console.warn('DM upload failed:', err);
                 alert('Your attachment could not be sent right now.');
@@ -3447,12 +3458,12 @@
             if (!selectedDmKey) return;
             const input = document.getElementById('admin-dm-reply-input');
             const text = (input ? input.value : '').trim();
-            if (!text && !adminDmPendingAttachment) {
+            if (!text && adminDmPendingAttachments.length === 0) {
                 alert('Write a reply or attach a photo or voicemail first.');
                 return;
             }
             const sendPayload = (mediaUrl, mediaType) => {
-                database.ref('direct_messages/' + selectedDmKey).push({
+                return database.ref('direct_messages/' + selectedDmKey).push({
                     from: 'admin',
                     userTag: 'The Keeper',
                     text: text || '',
@@ -3466,14 +3477,18 @@
                     loadAdminDmInbox();
                 });
             };
-            if (!adminDmPendingAttachment) {
+            if (adminDmPendingAttachments.length === 0) {
                 sendPayload('', null);
                 return;
             }
-            const storagePath = 'direct_messages/' + selectedDmKey + '/' + Date.now() + '_' + adminDmPendingAttachmentName.replace(/\s+/g, '_');
-            const uploadTask = firebase.storage().ref(storagePath).put(adminDmPendingAttachment);
-            uploadTask.then(snapshot => snapshot.ref.getDownloadURL()).then(url => {
-                sendPayload(url, adminDmPendingAttachmentType === 'image' ? 'image' : 'audio');
+            const attachmentType = adminDmPendingAttachmentType === 'image' ? 'image' : 'audio';
+            Promise.all(adminDmPendingAttachments.map(file => {
+                const storagePath = 'direct_messages/' + selectedDmKey + '/' + Date.now() + '_' + file.name.replace(/\s+/g, '_');
+                return firebase.storage().ref(storagePath).put(file)
+                    .then(snapshot => snapshot.ref.getDownloadURL())
+                    .then(url => ({ url, mediaType: attachmentType }));
+            })).then(results => {
+                return Promise.all(results.map(result => sendPayload(result.url, result.mediaType)));
             }).catch(err => {
                 console.warn('Admin DM upload failed:', err);
                 alert('Your attachment could not be sent right now.');
