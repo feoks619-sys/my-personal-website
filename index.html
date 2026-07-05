@@ -344,6 +344,31 @@
             opacity: 0.8;
             font-weight: 700;
         }
+        .dm-message-actions-inline {
+            display: flex;
+            gap: 6px;
+            justify-content: flex-end;
+            margin-top: 8px;
+            opacity: 0.6;
+            transition: opacity 0.16s ease, transform 0.16s ease;
+        }
+        .dm-message-actions-inline.visible {
+            opacity: 0.95;
+            transform: translateY(-1px);
+        }
+        .dm-message-action-btn-inline {
+            border: none;
+            border-radius: 999px;
+            padding: 4px 8px;
+            font-size: 0.67rem;
+            cursor: pointer;
+            background: rgba(74,63,53,0.16);
+            color: #4a3f35;
+        }
+        .dm-bubble.mine .dm-message-action-btn-inline {
+            background: rgba(255,248,220,0.18);
+            color: #fff8dc;
+        }
         .dm-edit-box {
             margin-top: 6px;
             display: flex;
@@ -2049,6 +2074,7 @@
         let dmEditState = { conversationKey: null, messageKey: null, draft: '' };
         let dmOverlayVisible = false;
         let adminDmSidebarVisible = false;
+        let dmLongPressTimer = null;
         let adminDmPendingAttachment = null;
         let adminDmPendingAttachmentType = null;
         let adminDmPendingAttachmentName = "";
@@ -2112,6 +2138,39 @@
             const shouldLock = dmOverlayVisible || adminDmSidebarVisible;
             document.body.style.overflow = shouldLock ? 'hidden' : '';
             document.documentElement.style.overflow = shouldLock ? 'hidden' : '';
+        }
+
+        function clearDmLongPressTimer() {
+            if (dmLongPressTimer) {
+                clearTimeout(dmLongPressTimer);
+                dmLongPressTimer = null;
+            }
+        }
+
+        function hideDmActionMenu() {
+            document.querySelectorAll('.dm-message-actions-inline.visible').forEach(item => item.classList.remove('visible'));
+        }
+
+        function revealDmActionMenu(target) {
+            if (!target) return;
+            hideDmActionMenu();
+            const row = target.querySelector('.dm-message-actions-inline');
+            if (row) {
+                row.classList.add('visible');
+            }
+        }
+
+        function handleDmBubblePointerDown(event) {
+            const bubble = event.target.closest('.dm-bubble[data-dm-long-press="true"]');
+            if (!bubble || event.target.closest('button')) return;
+            clearDmLongPressTimer();
+            dmLongPressTimer = window.setTimeout(() => {
+                revealDmActionMenu(bubble);
+            }, 450);
+        }
+
+        function handleDmBubblePointerUp() {
+            clearDmLongPressTimer();
         }
 
         const officialAdminName = 'The Keeper';
@@ -2295,8 +2354,12 @@
                 const actionsMarkup = !message.deleted ? `
                     <div class="dm-message-actions">
                         ${message.mediaUrl ? `<button type="button" class="dm-camera-badge" data-dm-action="media" data-media-url="${escapeHtml(message.mediaUrl)}" data-media-type="${escapeHtml(message.mediaType || '')}" title="Open attachment">📷</button>` : ''}
-                        ${canManageDmMessage(message) && !editingThis ? `<button type="button" class="dm-message-action-btn" data-dm-action="edit" data-conversation-key="${escapeHtml(conversationKey)}" data-message-key="${escapeHtml(message.fbKey || '')}" data-initial-text="${escapeHtml(message.text || '')}">edit</button>` : ''}
-                        ${canManageDmMessage(message) ? `<button type="button" class="dm-message-action-btn" data-dm-action="delete" data-conversation-key="${escapeHtml(conversationKey)}" data-message-key="${escapeHtml(message.fbKey || '')}">delete</button>` : ''}
+                    </div>
+                ` : '';
+                const bottomActionsMarkup = !message.deleted && canManageDmMessage(message) && !editingThis ? `
+                    <div class="dm-message-actions-inline ${isMine ? 'visible' : ''}">
+                        <button type="button" class="dm-message-action-btn-inline" data-dm-action="edit" data-conversation-key="${escapeHtml(conversationKey)}" data-message-key="${escapeHtml(message.fbKey || '')}" data-initial-text="${escapeHtml(message.text || '')}">edit</button>
+                        <button type="button" class="dm-message-action-btn-inline" data-dm-action="delete" data-conversation-key="${escapeHtml(conversationKey)}" data-message-key="${escapeHtml(message.fbKey || '')}">delete</button>
                     </div>
                 ` : '';
                 const bodyMarkup = message.deleted
@@ -2319,10 +2382,15 @@
                             ${actionsMarkup}
                         </div>
                         ${bodyMarkup}
+                        ${bottomActionsMarkup}
                     </div>
                 `;
             }).join('');
             container.onclick = handleDmInlineAction;
+            container.onpointerdown = handleDmBubblePointerDown;
+            container.onpointerup = handleDmBubblePointerUp;
+            container.onpointercancel = handleDmBubblePointerUp;
+            container.onpointerleave = handleDmBubblePointerUp;
             setTimeout(() => {
                 container.scrollTop = container.scrollHeight;
             }, 40);
@@ -3310,8 +3378,12 @@
                 const actionsMarkup = !message.deleted ? `
                     <div class="dm-message-actions">
                         ${message.mediaUrl ? `<button type="button" class="dm-camera-badge" onclick="openDmMedia('${escapeHtml(message.mediaUrl)}', '${escapeHtml(message.mediaType || '')}')" title="Open attachment">📷</button>` : ''}
-                        ${canManageDmMessage(message) && !editingThis ? `<button type="button" class="dm-message-action-btn" onclick="startEditDmMessage('${escapeHtml(activeConversation.key)}','${escapeHtml(message.fbKey || '')}')">edit</button>` : ''}
-                        ${canManageDmMessage(message) ? `<button type="button" class="dm-message-action-btn" onclick="deleteDmMessage('${escapeHtml(activeConversation.key)}','${escapeHtml(message.fbKey || '')}')">delete</button>` : ''}
+                    </div>
+                ` : '';
+                const bottomActionsMarkup = !message.deleted && canManageDmMessage(message) && !editingThis ? `
+                    <div class="dm-message-actions-inline ${isOutgoing ? '' : 'visible'}">
+                        <button type="button" class="dm-message-action-btn-inline" data-dm-action="edit" data-conversation-key="${escapeHtml(activeConversation.key)}" data-message-key="${escapeHtml(message.fbKey || '')}" data-initial-text="${escapeHtml(message.text || '')}">edit</button>
+                        <button type="button" class="dm-message-action-btn-inline" data-dm-action="delete" data-conversation-key="${escapeHtml(activeConversation.key)}" data-message-key="${escapeHtml(message.fbKey || '')}">delete</button>
                     </div>
                 ` : '';
                 const bodyMarkup = message.deleted
@@ -3328,17 +3400,22 @@
                         `
                         : `${message.text ? `<div>${escapeHtml(message.text)}</div>` : ''}${mediaMarkup}`;
                 return `
-                    <div class="admin-dm-bubble ${isOutgoing ? 'outgoing' : ''}">
+                    <div class="admin-dm-bubble ${isOutgoing ? 'outgoing' : ''}" data-dm-long-press="${isOutgoing ? 'true' : 'false'}">
                         <div class="dm-bubble-header">
                             <div class="admin-dm-conversation-preview">${escapeHtml(label)}</div>
                             ${actionsMarkup}
                         </div>
                         ${bodyMarkup}
+                        ${bottomActionsMarkup}
                         <small>${escapeHtml(message.timestampText || '')}${message.edited ? ' <span class="dm-edited-badge">edited</span>' : ''}</small>
                     </div>
                 `;
             }).join('');
             body.onclick = handleDmInlineAction;
+            body.onpointerdown = handleDmBubblePointerDown;
+            body.onpointerup = handleDmBubblePointerUp;
+            body.onpointercancel = handleDmBubblePointerUp;
+            body.onpointerleave = handleDmBubblePointerUp;
             if (!activeConversation.messages || activeConversation.messages.length === 0) {
                 body.innerHTML = '<div class="admin-dm-thread-empty">No messages in this whisper thread yet.</div>';
             }
