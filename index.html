@@ -438,6 +438,12 @@
             color: #7a5520;
             min-height: 1.2em;
         }
+        .dm-record-status {
+            font-size: 0.75rem;
+            color: #3578f6;
+            min-height: 1.2em;
+            margin-top: 2px;
+        }
         .dm-attach-send-btn {
             border: none;
             border-radius: 999px;
@@ -2005,7 +2011,11 @@
                         🎙️ voicemail
                         <input id="admin-dm-audio-input" type="file" accept="audio/*" multiple onchange="handleAdminDmAttachmentSelect('audio')" style="display:none;">
                     </label>
-                    <div id="admin-dm-attachment-name" class="admin-dm-attachment-name">No attachment</div>
+                    <button type="button" id="admin-dm-record-btn" class="admin-dm-attach-btn" onclick="toggleAdminDmRecording()">🎤 record</button>
+                    <div>
+                        <div id="admin-dm-attachment-name" class="admin-dm-attachment-name">No attachment</div>
+                        <div id="admin-dm-record-status" class="dm-record-status"></div>
+                    </div>
                     <button type="button" id="admin-dm-send-attach-btn" class="dm-attach-send-btn" onclick="sendAdminDmReply()" style="display:none;">send</button>
                 </div>
                 <div class="admin-dm-reply-box">
@@ -2087,6 +2097,10 @@
         let dmPendingAttachments = [];
         let dmPendingAttachmentType = null;
         let dmPendingAttachmentNames = [];
+        let dmRecorder = null;
+        let dmRecordingChunks = [];
+        let dmRecordingBlob = null;
+        let dmRecordingUrl = null;
         let dmMessagesRef = null;
         let dmMessagesListener = null;
         let currentView = "live"; 
@@ -2106,6 +2120,10 @@
         let adminDmPendingAttachments = [];
         let adminDmPendingAttachmentType = null;
         let adminDmPendingAttachmentNames = [];
+        let adminDmRecorder = null;
+        let adminDmRecordingChunks = [];
+        let adminDmRecordingBlob = null;
+        let adminDmRecordingUrl = null;
 
         function normalizePostsPayload(data) {
             if (!data || typeof data !== 'object') {
@@ -2488,43 +2506,165 @@
         function handleDmAttachmentSelect(type) {
             const input = type === 'image' ? document.getElementById('dm-photo-input') : document.getElementById('dm-audio-input');
             if (!input || !input.files || input.files.length === 0) return;
+            stopDmRecording();
             const files = Array.from(input.files);
             dmPendingAttachments = files;
             dmPendingAttachmentType = type;
             dmPendingAttachmentNames = files.map(file => file.name);
-            const label = document.getElementById('dm-attachment-name');
-            if (label) {
-                label.textContent = files.length === 1 ? 'Attached: ' + files[0].name : 'Attached: ' + files.length + ' files';
-            }
-            const sendButton = document.getElementById('dm-send-attach-btn');
-            if (sendButton) {
-                sendButton.style.display = 'inline-flex';
-            }
+            updateDmAttachmentControls();
         }
 
         function handleAdminDmAttachmentSelect(type) {
             const input = type === 'image' ? document.getElementById('admin-dm-photo-input') : document.getElementById('admin-dm-audio-input');
             if (!input || !input.files || input.files.length === 0) return;
+            stopAdminDmRecording();
             const files = Array.from(input.files);
             adminDmPendingAttachments = files;
             adminDmPendingAttachmentType = type;
             adminDmPendingAttachmentNames = files.map(file => file.name);
-            const label = document.getElementById('admin-dm-attachment-name');
+            updateAdminDmAttachmentControls();
+        }
+
+        function updateDmAttachmentControls() {
+            const label = document.getElementById('dm-attachment-name');
+            const status = document.getElementById('dm-record-status');
+            const sendButton = document.getElementById('dm-send-attach-btn');
             if (label) {
-                label.textContent = files.length === 1 ? 'Attached: ' + files[0].name : 'Attached: ' + files.length + ' files';
+                label.textContent = dmPendingAttachments.length === 1 ? 'Attached: ' + dmPendingAttachments[0].name : dmPendingAttachments.length > 1 ? 'Attached: ' + dmPendingAttachments.length + ' files' : 'No attachment';
             }
-            const sendButton = document.getElementById('admin-dm-send-attach-btn');
+            if (status) {
+                status.textContent = dmRecordingBlob ? 'Recorded voicemail ready to send' : '';
+            }
             if (sendButton) {
-                sendButton.style.display = 'inline-flex';
+                sendButton.style.display = dmPendingAttachments.length > 0 || dmRecordingBlob ? 'inline-flex' : 'none';
             }
+        }
+
+        function updateAdminDmAttachmentControls() {
+            const label = document.getElementById('admin-dm-attachment-name');
+            const status = document.getElementById('admin-dm-record-status');
+            const sendButton = document.getElementById('admin-dm-send-attach-btn');
+            if (label) {
+                label.textContent = adminDmPendingAttachments.length === 1 ? 'Attached: ' + adminDmPendingAttachments[0].name : adminDmPendingAttachments.length > 1 ? 'Attached: ' + adminDmPendingAttachments.length + ' files' : 'No attachment';
+            }
+            if (status) {
+                status.textContent = adminDmRecordingBlob ? 'Recorded voicemail ready to send' : '';
+            }
+            if (sendButton) {
+                sendButton.style.display = adminDmPendingAttachments.length > 0 || adminDmRecordingBlob ? 'inline-flex' : 'none';
+            }
+        }
+
+        function createAudioFileFromBlob(blob, filename) {
+            if (!blob) return null;
+            return new File([blob], filename, { type: blob.type || 'audio/webm' });
+        }
+
+        function toggleDmRecording() {
+            if (dmRecorder && dmRecorder.state === 'recording') {
+                stopDmRecording();
+                return;
+            }
+            startDmRecording();
+        }
+
+        function toggleAdminDmRecording() {
+            if (adminDmRecorder && adminDmRecorder.state === 'recording') {
+                stopAdminDmRecording();
+                return;
+            }
+            startAdminDmRecording();
+        }
+
+        function startDmRecording() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                alert('Your browser does not support direct voicemail recording.');
+                return;
+            }
+            stopDmRecording();
+            navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+                dmRecordingChunks = [];
+                dmRecorder = new MediaRecorder(stream);
+                dmRecorder.ondataavailable = event => {
+                    if (event.data && event.data.size > 0) dmRecordingChunks.push(event.data);
+                };
+                dmRecorder.onstop = () => {
+                    dmRecordingBlob = new Blob(dmRecordingChunks, { type: 'audio/webm' });
+                    dmRecordingUrl = URL.createObjectURL(dmRecordingBlob);
+                    dmPendingAttachments = [];
+                    dmPendingAttachmentType = 'audio';
+                    dmPendingAttachmentNames = ['recorded-voicemail.webm'];
+                    updateDmAttachmentControls();
+                    stream.getTracks().forEach(track => track.stop());
+                };
+                dmRecorder.start();
+                const status = document.getElementById('dm-record-status');
+                if (status) status.textContent = 'Recording… click record again to stop';
+            }).catch(err => {
+                console.warn('Microphone permission denied or unavailable:', err);
+                alert('Unable to access microphone. Please allow microphone access or use a file upload.');
+            });
+        }
+
+        function startAdminDmRecording() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                alert('Your browser does not support direct voicemail recording.');
+                return;
+            }
+            stopAdminDmRecording();
+            navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+                adminDmRecordingChunks = [];
+                adminDmRecorder = new MediaRecorder(stream);
+                adminDmRecorder.ondataavailable = event => {
+                    if (event.data && event.data.size > 0) adminDmRecordingChunks.push(event.data);
+                };
+                adminDmRecorder.onstop = () => {
+                    adminDmRecordingBlob = new Blob(adminDmRecordingChunks, { type: 'audio/webm' });
+                    adminDmRecordingUrl = URL.createObjectURL(adminDmRecordingBlob);
+                    adminDmPendingAttachments = [];
+                    adminDmPendingAttachmentType = 'audio';
+                    adminDmPendingAttachmentNames = ['recorded-voicemail.webm'];
+                    updateAdminDmAttachmentControls();
+                    stream.getTracks().forEach(track => track.stop());
+                };
+                adminDmRecorder.start();
+                const status = document.getElementById('admin-dm-record-status');
+                if (status) status.textContent = 'Recording… click record again to stop';
+            }).catch(err => {
+                console.warn('Microphone permission denied or unavailable:', err);
+                alert('Unable to access microphone. Please allow microphone access or use a file upload.');
+            });
+        }
+
+        function stopDmRecording() {
+            if (dmRecorder && dmRecorder.state === 'recording') {
+                dmRecorder.stop();
+            }
+            dmRecorder = null;
+            const status = document.getElementById('dm-record-status');
+            if (status) status.textContent = dmRecordingBlob ? 'Recorded voicemail ready to send' : '';
+            updateDmAttachmentControls();
+        }
+
+        function stopAdminDmRecording() {
+            if (adminDmRecorder && adminDmRecorder.state === 'recording') {
+                adminDmRecorder.stop();
+            }
+            adminDmRecorder = null;
+            const status = document.getElementById('admin-dm-record-status');
+            if (status) status.textContent = adminDmRecordingBlob ? 'Recorded voicemail ready to send' : '';
+            updateAdminDmAttachmentControls();
         }
 
         function clearDmAttachment() {
             dmPendingAttachments = [];
             dmPendingAttachmentType = null;
             dmPendingAttachmentNames = [];
+            stopDmRecording();
             const label = document.getElementById('dm-attachment-name');
             if (label) label.textContent = 'No attachment';
+            const status = document.getElementById('dm-record-status');
+            if (status) status.textContent = '';
             const sendButton = document.getElementById('dm-send-attach-btn');
             if (sendButton) sendButton.style.display = 'none';
             const photoInput = document.getElementById('dm-photo-input');
@@ -2537,8 +2677,11 @@
             adminDmPendingAttachments = [];
             adminDmPendingAttachmentType = null;
             adminDmPendingAttachmentNames = [];
+            stopAdminDmRecording();
             const label = document.getElementById('admin-dm-attachment-name');
             if (label) label.textContent = 'No attachment';
+            const status = document.getElementById('admin-dm-record-status');
+            if (status) status.textContent = '';
             const sendButton = document.getElementById('admin-dm-send-attach-btn');
             if (sendButton) sendButton.style.display = 'none';
             const photoInput = document.getElementById('admin-dm-photo-input');
@@ -2574,11 +2717,12 @@
                 alert('Pick a nickname first to send a private whisper.');
                 return;
             }
-            if (!text && dmPendingAttachments.length === 0) {
+            const attachments = dmRecordingBlob ? [createAudioFileFromBlob(dmRecordingBlob, 'recorded-voicemail.webm')] : dmPendingAttachments;
+            if (!text && attachments.length === 0) {
                 alert('Write a message or attach a photo or voicemail first.');
                 return;
             }
-            if (dmPendingAttachments.length === 0) {
+            if (attachments.length === 0) {
                 saveDirectMessage(text, '', null).catch(err => {
                     console.warn('DM send failed:', err);
                     alert('Your message could not be sent right now.');
@@ -2586,7 +2730,7 @@
                 return;
             }
             const attachmentType = dmPendingAttachmentType === 'image' ? 'image' : 'audio';
-            Promise.all(dmPendingAttachments.map(file => readDmFileAsDataUrl(file))).then(dataUrls => {
+            Promise.all(attachments.map(file => readDmFileAsDataUrl(file))).then(dataUrls => {
                 const uploads = dataUrls.map(dataUrl => saveDirectMessage(text, dataUrl, attachmentType));
                 return Promise.all(uploads);
             }).catch(err => {
@@ -3530,7 +3674,8 @@
             if (!selectedDmKey) return;
             const input = document.getElementById('admin-dm-reply-input');
             const text = (input ? input.value : '').trim();
-            if (!text && adminDmPendingAttachments.length === 0) {
+            const attachments = adminDmRecordingBlob ? [createAudioFileFromBlob(adminDmRecordingBlob, 'recorded-voicemail.webm')] : adminDmPendingAttachments;
+            if (!text && attachments.length === 0) {
                 alert('Write a reply or attach a photo or voicemail first.');
                 return;
             }
@@ -3549,12 +3694,12 @@
                     loadAdminDmInbox();
                 });
             };
-            if (adminDmPendingAttachments.length === 0) {
+            if (attachments.length === 0) {
                 sendPayload('', null);
                 return;
             }
             const attachmentType = adminDmPendingAttachmentType === 'image' ? 'image' : 'audio';
-            Promise.all(adminDmPendingAttachments.map(file => readDmFileAsDataUrl(file))).then(dataUrls => {
+            Promise.all(attachments.map(file => readDmFileAsDataUrl(file))).then(dataUrls => {
                 const uploads = dataUrls.map(dataUrl => sendPayload(dataUrl, attachmentType));
                 return Promise.all(uploads);
             }).catch(err => {
