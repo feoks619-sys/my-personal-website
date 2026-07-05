@@ -2061,7 +2061,7 @@
             window.open(mediaUrl, '_blank', 'noopener,noreferrer');
         }
 
-        function startEditDmMessage(conversationKey, messageKey) {
+        function startEditDmMessage(conversationKey, messageKey, initialText) {
             const normalizedKey = String(conversationKey || '').trim().toLowerCase();
             const normalizedMessageKey = String(messageKey || '').trim();
             if (!normalizedKey || !normalizedMessageKey) return;
@@ -2069,7 +2069,7 @@
             dmEditState = {
                 conversationKey: normalizedKey,
                 messageKey: normalizedMessageKey,
-                draft: currentMessage && typeof currentMessage.text === 'string' ? currentMessage.text : ''
+                draft: String(initialText || (currentMessage && typeof currentMessage.text === 'string' ? currentMessage.text : ''))
             };
             renderDirectMessages(directMessagesCache);
             renderDmInbox(dmInboxConversations);
@@ -2088,7 +2088,9 @@
         function saveDmEdit(conversationKey, messageKey) {
             const normalizedKey = String(conversationKey || '').trim().toLowerCase();
             const normalizedMessageKey = String(messageKey || '').trim();
-            const cleaned = String(dmEditState.draft || '').trim();
+            const textarea = document.querySelector('.dm-edit-box textarea');
+            const draftValue = textarea && typeof textarea.value === 'string' ? textarea.value : (dmEditState.draft || '');
+            const cleaned = String(draftValue || '').trim();
             if (!normalizedKey || !normalizedMessageKey) return;
             if (!cleaned) {
                 alert('Message cannot be empty.');
@@ -2117,6 +2119,31 @@
                 return message.from === 'admin';
             }
             return message.from === 'user';
+        }
+
+        function handleDmInlineAction(event) {
+            const button = event.target.closest('button[data-dm-action]');
+            if (!button) return;
+            const action = button.getAttribute('data-dm-action');
+            const conversationKey = button.getAttribute('data-conversation-key');
+            const messageKey = button.getAttribute('data-message-key');
+            const mediaUrl = button.getAttribute('data-media-url');
+            const mediaType = button.getAttribute('data-media-type');
+            const initialText = button.getAttribute('data-initial-text');
+            if (action === 'media') {
+                openDmMedia(mediaUrl, mediaType);
+                return;
+            }
+            if (!conversationKey || !messageKey) return;
+            if (action === 'edit') {
+                startEditDmMessage(conversationKey, messageKey, initialText);
+            } else if (action === 'delete') {
+                deleteDmMessage(conversationKey, messageKey);
+            } else if (action === 'save') {
+                saveDmEdit(conversationKey, messageKey);
+            } else if (action === 'cancel') {
+                cancelDmEdit();
+            }
         }
 
         function deleteDmMessage(conversationKey, messageKey) {
@@ -2164,9 +2191,9 @@
                 const editingThis = dmEditState.conversationKey === conversationKey && dmEditState.messageKey === message.fbKey;
                 const actionsMarkup = !message.deleted ? `
                     <div class="dm-message-actions">
-                        ${message.mediaUrl ? `<button type="button" class="dm-camera-badge" onclick="openDmMedia('${escapeHtml(message.mediaUrl)}', '${escapeHtml(message.mediaType || '')}')" title="Open attachment">📷</button>` : ''}
-                        ${canManageDmMessage(message) && !editingThis ? `<button type="button" class="dm-message-action-btn" onclick="startEditDmMessage('${escapeHtml(conversationKey)}','${escapeHtml(message.fbKey || '')}')">edit</button>` : ''}
-                        ${canManageDmMessage(message) ? `<button type="button" class="dm-message-action-btn" onclick="deleteDmMessage('${escapeHtml(conversationKey)}','${escapeHtml(message.fbKey || '')}')">delete</button>` : ''}
+                        ${message.mediaUrl ? `<button type="button" class="dm-camera-badge" data-dm-action="media" data-media-url="${escapeHtml(message.mediaUrl)}" data-media-type="${escapeHtml(message.mediaType || '')}" title="Open attachment">📷</button>` : ''}
+                        ${canManageDmMessage(message) && !editingThis ? `<button type="button" class="dm-message-action-btn" data-dm-action="edit" data-conversation-key="${escapeHtml(conversationKey)}" data-message-key="${escapeHtml(message.fbKey || '')}" data-initial-text="${escapeHtml(message.text || '')}">edit</button>` : ''}
+                        ${canManageDmMessage(message) ? `<button type="button" class="dm-message-action-btn" data-dm-action="delete" data-conversation-key="${escapeHtml(conversationKey)}" data-message-key="${escapeHtml(message.fbKey || '')}">delete</button>` : ''}
                     </div>
                 ` : '';
                 const bodyMarkup = message.deleted
@@ -2176,8 +2203,8 @@
                             <div class="dm-edit-box">
                                 <textarea oninput="updateDmEditDraft(this.value)">${escapeHtml(dmEditState.draft || '')}</textarea>
                                 <div class="dm-edit-actions">
-                                    <button type="button" onclick="saveDmEdit('${escapeHtml(conversationKey)}','${escapeHtml(message.fbKey || '')}')">save</button>
-                                    <button type="button" onclick="cancelDmEdit()">cancel</button>
+                                    <button type="button" data-dm-action="save" data-conversation-key="${escapeHtml(conversationKey)}" data-message-key="${escapeHtml(message.fbKey || '')}">save</button>
+                                    <button type="button" data-dm-action="cancel">cancel</button>
                                 </div>
                             </div>
                         `
@@ -2192,6 +2219,7 @@
                     </div>
                 `;
             }).join('');
+            container.onclick = handleDmInlineAction;
             setTimeout(() => {
                 container.scrollTop = container.scrollHeight;
             }, 40);
@@ -3203,6 +3231,7 @@
                     </div>
                 `;
             }).join('');
+            body.onclick = handleDmInlineAction;
             if (!activeConversation.messages || activeConversation.messages.length === 0) {
                 body.innerHTML = '<div class="admin-dm-thread-empty">No messages in this whisper thread yet.</div>';
             }
