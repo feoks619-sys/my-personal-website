@@ -2052,7 +2052,11 @@
                     🎙️ voicemail
                     <input id="dm-audio-input" type="file" accept="audio/*" multiple onchange="handleDmAttachmentSelect('audio')" style="display:none;">
                 </label>
-                <div id="dm-attachment-name" class="dm-attachment-name">No attachment</div>
+                <button type="button" id="dm-record-btn" class="dm-attach-btn" onclick="toggleDmRecording()">🎤 record</button>
+                <div>
+                    <div id="dm-attachment-name" class="dm-attachment-name">No attachment</div>
+                    <div id="dm-record-status" class="dm-record-status">Use record to capture voicemail directly in the browser.</div>
+                </div>
                 <button type="button" id="dm-send-attach-btn" class="dm-attach-send-btn" onclick="sendDmMessage()" style="display:none;">send</button>
             </div>
             <div class="dm-composer">
@@ -2503,14 +2507,30 @@
             });
         }
 
+        function uploadDmAttachmentFile(file, conversationKey) {
+            if (!file || !conversationKey) return Promise.reject(new Error('Missing upload data'));
+            const safeKey = String(conversationKey).replace(/[^a-zA-Z0-9_-]/g, '_');
+            const timestamp = Date.now();
+            const originalName = file && typeof file.name === 'string' && file.name.trim().length > 0
+                ? file.name
+                : 'attachment.' + ((file && file.type && file.type.split('/')[1]) || 'webm');
+            const safeName = String(originalName).replace(/[^a-zA-Z0-9_.-]/g, '_');
+            const storagePath = 'dm_attachments/' + safeKey + '/' + timestamp + '_' + safeName;
+            const storageRef = storage.ref(storagePath);
+            const metadata = { contentType: file.type || 'application/octet-stream' };
+            return storageRef.put(file, metadata).then(snapshot => snapshot.ref.getDownloadURL());
+        }
+
         function handleDmAttachmentSelect(type) {
             const input = type === 'image' ? document.getElementById('dm-photo-input') : document.getElementById('dm-audio-input');
             if (!input || !input.files || input.files.length === 0) return;
             stopDmRecording();
+            dmRecordingBlob = null;
+            dmRecordingUrl = null;
             const files = Array.from(input.files);
             dmPendingAttachments = files;
             dmPendingAttachmentType = type;
-            dmPendingAttachmentNames = files.map(file => file.name);
+            dmPendingAttachmentNames = files.map(file => file.name || 'attachment');
             updateDmAttachmentControls();
         }
 
@@ -2518,10 +2538,12 @@
             const input = type === 'image' ? document.getElementById('admin-dm-photo-input') : document.getElementById('admin-dm-audio-input');
             if (!input || !input.files || input.files.length === 0) return;
             stopAdminDmRecording();
+            adminDmRecordingBlob = null;
+            adminDmRecordingUrl = null;
             const files = Array.from(input.files);
             adminDmPendingAttachments = files;
             adminDmPendingAttachmentType = type;
-            adminDmPendingAttachmentNames = files.map(file => file.name);
+            adminDmPendingAttachmentNames = files.map(file => file.name || 'attachment');
             updateAdminDmAttachmentControls();
         }
 
@@ -2557,28 +2579,47 @@
 
         function createAudioFileFromBlob(blob, filename) {
             if (!blob) return null;
-            return new File([blob], filename, { type: blob.type || 'audio/webm' });
+            const fileName = filename || 'recorded-voicemail.webm';
+            try {
+                return new File([blob], fileName, { type: blob.type || 'audio/webm' });
+            } catch (err) {
+                const fallbackBlob = blob;
+                try {
+                    fallbackBlob.name = fileName;
+                } catch (innerErr) {
+                    // some Blob implementations are read-only for name, just return the blob
+                }
+                return fallbackBlob;
+            }
         }
 
         function toggleDmRecording() {
+            const button = document.getElementById('dm-record-btn');
             if (dmRecorder && dmRecorder.state === 'recording') {
                 stopDmRecording();
+                if (button) button.textContent = '🎤 record';
                 return;
             }
+            if (button) button.textContent = '⏹ stop';
             startDmRecording();
         }
 
         function toggleAdminDmRecording() {
+            const button = document.getElementById('admin-dm-record-btn');
             if (adminDmRecorder && adminDmRecorder.state === 'recording') {
                 stopAdminDmRecording();
+                if (button) button.textContent = '🎤 record';
                 return;
             }
+            if (button) button.textContent = '⏹ stop';
             startAdminDmRecording();
         }
 
         function startDmRecording() {
-            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                alert('Your browser does not support direct voicemail recording.');
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === 'undefined') {
+                alert('Your browser does not support direct voicemail recording. Try a modern browser or use the file upload fallback.');
+                const status = document.getElementById('dm-record-status');
+                if (status) status.textContent = 'Browser cannot record audio directly.';
                 return;
             }
             stopDmRecording();
@@ -2607,8 +2648,10 @@
         }
 
         function startAdminDmRecording() {
-            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                alert('Your browser does not support direct voicemail recording.');
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === 'undefined') {
+                alert('Your browser does not support direct voicemail recording. Try a modern browser or use the file upload fallback.');
+                const status = document.getElementById('admin-dm-record-status');
+                if (status) status.textContent = 'Browser cannot record audio directly.';
                 return;
             }
             stopAdminDmRecording();
@@ -2641,8 +2684,10 @@
                 dmRecorder.stop();
             }
             dmRecorder = null;
+            const button = document.getElementById('dm-record-btn');
+            if (button) button.textContent = '🎤 record';
             const status = document.getElementById('dm-record-status');
-            if (status) status.textContent = dmRecordingBlob ? 'Recorded voicemail ready to send' : '';
+            if (status) status.textContent = dmRecordingBlob ? 'Recorded voicemail ready to send' : 'Recording stopped.';
             updateDmAttachmentControls();
         }
 
@@ -2651,8 +2696,10 @@
                 adminDmRecorder.stop();
             }
             adminDmRecorder = null;
+            const button = document.getElementById('admin-dm-record-btn');
+            if (button) button.textContent = '🎤 record';
             const status = document.getElementById('admin-dm-record-status');
-            if (status) status.textContent = adminDmRecordingBlob ? 'Recorded voicemail ready to send' : '';
+            if (status) status.textContent = adminDmRecordingBlob ? 'Recorded voicemail ready to send' : 'Recording stopped.';
             updateAdminDmAttachmentControls();
         }
 
@@ -2660,6 +2707,8 @@
             dmPendingAttachments = [];
             dmPendingAttachmentType = null;
             dmPendingAttachmentNames = [];
+            dmRecordingBlob = null;
+            dmRecordingUrl = null;
             stopDmRecording();
             const label = document.getElementById('dm-attachment-name');
             if (label) label.textContent = 'No attachment';
@@ -2677,6 +2726,8 @@
             adminDmPendingAttachments = [];
             adminDmPendingAttachmentType = null;
             adminDmPendingAttachmentNames = [];
+            adminDmRecordingBlob = null;
+            adminDmRecordingUrl = null;
             stopAdminDmRecording();
             const label = document.getElementById('admin-dm-attachment-name');
             if (label) label.textContent = 'No attachment';
@@ -2730,12 +2781,22 @@
                 return;
             }
             const attachmentType = dmPendingAttachmentType === 'image' ? 'image' : 'audio';
-            Promise.all(attachments.map(file => readDmFileAsDataUrl(file))).then(dataUrls => {
-                const uploads = dataUrls.map(dataUrl => saveDirectMessage(text, dataUrl, attachmentType));
+            Promise.all(attachments.map(file => uploadDmAttachmentFile(file, key))).then(urls => {
+                const uploads = urls.map(mediaUrl => saveDirectMessage(text, mediaUrl, attachmentType));
                 return Promise.all(uploads);
             }).catch(err => {
                 console.warn('DM upload failed:', err);
-                alert('Your attachment could not be sent right now.');
+                if (attachments.length > 0) {
+                    Promise.all(attachments.map(file => readDmFileAsDataUrl(file))).then(dataUrls => {
+                        const fallbackUploads = dataUrls.map(dataUrl => saveDirectMessage(text, dataUrl, attachmentType));
+                        return Promise.all(fallbackUploads);
+                    }).catch(fallbackErr => {
+                        console.warn('Fallback DM upload failed:', fallbackErr);
+                        alert('Your attachment could not be sent right now.');
+                    });
+                } else {
+                    alert('Your attachment could not be sent right now.');
+                }
             });
         }
 
@@ -3699,12 +3760,22 @@
                 return;
             }
             const attachmentType = adminDmPendingAttachmentType === 'image' ? 'image' : 'audio';
-            Promise.all(attachments.map(file => readDmFileAsDataUrl(file))).then(dataUrls => {
-                const uploads = dataUrls.map(dataUrl => sendPayload(dataUrl, attachmentType));
+            Promise.all(attachments.map(file => uploadDmAttachmentFile(file, selectedDmKey))).then(urls => {
+                const uploads = urls.map(mediaUrl => sendPayload(mediaUrl, attachmentType));
                 return Promise.all(uploads);
             }).catch(err => {
                 console.warn('Admin DM upload failed:', err);
-                alert('Your attachment could not be sent right now.');
+                if (attachments.length > 0) {
+                    Promise.all(attachments.map(file => readDmFileAsDataUrl(file))).then(dataUrls => {
+                        const fallbackUploads = dataUrls.map(dataUrl => sendPayload(dataUrl, attachmentType));
+                        return Promise.all(fallbackUploads);
+                    }).catch(fallbackErr => {
+                        console.warn('Fallback admin DM upload failed:', fallbackErr);
+                        alert('Your attachment could not be sent right now.');
+                    });
+                } else {
+                    alert('Your attachment could not be sent right now.');
+                }
             });
         }
 
