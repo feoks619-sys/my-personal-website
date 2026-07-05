@@ -2109,6 +2109,38 @@
             dmEditState = { ...dmEditState, draft: value };
         }
 
+        function applyLocalDmMessageUpdate(conversationKey, messageKey, updates) {
+            const normalizedKey = String(conversationKey || '').trim().toLowerCase();
+            const normalizedMessageKey = String(messageKey || '').trim();
+            if (!normalizedKey || !normalizedMessageKey) return;
+
+            const activeKey = (claimedSoulTag || localStorage.getItem('archive_soul_tag') || '').trim().toLowerCase();
+            if (normalizedKey === activeKey) {
+                directMessagesCache = directMessagesCache.map(message => {
+                    if (message.fbKey !== normalizedMessageKey) return message;
+                    return { ...message, ...updates };
+                });
+                renderDirectMessages(directMessagesCache);
+            }
+
+            if (!dmInboxConversations || dmInboxConversations.length === 0) return;
+            dmInboxConversations = dmInboxConversations.map(conversation => {
+                if (conversation.key !== normalizedKey) return conversation;
+                const messages = (conversation.messages || []).map(message => {
+                    if (message.fbKey !== normalizedMessageKey) return message;
+                    return { ...message, ...updates };
+                });
+                const lastMessage = messages[messages.length - 1] || null;
+                return {
+                    ...conversation,
+                    messages,
+                    lastMessageText: lastMessage && typeof lastMessage.text === 'string' ? lastMessage.text : conversation.lastMessageText,
+                    lastMessageTime: lastMessage && lastMessage.timestamp ? new Date(lastMessage.timestamp).toLocaleString() : conversation.lastMessageTime
+                };
+            });
+            renderDmInbox(dmInboxConversations);
+        }
+
         function cancelDmEdit() {
             dmEditState = { conversationKey: null, messageKey: null, draft: '' };
             renderDirectMessages(directMessagesCache);
@@ -2131,6 +2163,10 @@
                 text: cleaned,
                 edited: true
             }).then(() => {
+                applyLocalDmMessageUpdate(normalizedKey, normalizedMessageKey, {
+                    text: cleaned,
+                    edited: true
+                });
                 dmEditState = { conversationKey: null, messageKey: null, draft: '' };
                 if (normalizedKey === (claimedSoulTag || localStorage.getItem('archive_soul_tag') || '').trim().toLowerCase()) {
                     loadDirectMessages();
