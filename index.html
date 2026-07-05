@@ -15,14 +15,19 @@
     <script>
         (function () {
             try {
-                const appVersion = '20260705-2';
+                const appVersion = '20260705-3';
                 const currentUrl = new URL(window.location.href);
                 const storedVersion = localStorage.getItem('archive_app_version');
-                if (storedVersion !== appVersion || !currentUrl.searchParams.get('v')) {
+                const needsVersionQuery = !currentUrl.searchParams.get('v');
+                const needsReload = storedVersion !== appVersion || needsVersionQuery;
+                if (needsReload) {
                     localStorage.setItem('archive_app_version', appVersion);
                     currentUrl.searchParams.set('v', appVersion);
-                    if (currentUrl.search !== window.location.search) {
-                        window.location.replace(currentUrl.toString());
+                    const targetUrl = currentUrl.toString();
+                    if (targetUrl !== window.location.href) {
+                        window.location.replace(targetUrl);
+                    } else {
+                        window.location.reload(true);
                     }
                 }
             } catch (err) {
