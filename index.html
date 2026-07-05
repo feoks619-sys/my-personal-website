@@ -300,6 +300,37 @@
             color: #fff8dc;
         }
         .dm-bubble-meta { font-size: 0.72rem; opacity: 0.75; margin-bottom: 4px; }
+        .dm-edit-box {
+            margin-top: 6px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .dm-edit-box textarea {
+            width: 100%;
+            min-height: 64px;
+            border: 1px solid rgba(181, 123, 22, 0.25);
+            border-radius: 10px;
+            padding: 8px 10px;
+            font: inherit;
+            resize: vertical;
+            background: #fffdf4;
+            color: #3d2200;
+        }
+        .dm-edit-actions {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+        .dm-edit-actions button {
+            border: none;
+            border-radius: 999px;
+            padding: 4px 8px;
+            font-size: 0.68rem;
+            cursor: pointer;
+            background: rgba(74,63,53,0.12);
+            color: #4a3f35;
+        }
         .dm-media {
             width: 100%;
             max-height: 240px;
@@ -1955,6 +1986,8 @@
         let editingPostDraft = "";
         let dmInboxConversations = [];
         let selectedDmKey = null;
+        let directMessagesCache = [];
+        let dmEditState = { conversationKey: null, messageKey: null, draft: '' };
         let adminDmPendingAttachment = null;
         let adminDmPendingAttachmentType = null;
         let adminDmPendingAttachmentName = "";
@@ -2032,29 +2065,49 @@
             const normalizedKey = String(conversationKey || '').trim().toLowerCase();
             const normalizedMessageKey = String(messageKey || '').trim();
             if (!normalizedKey || !normalizedMessageKey) return;
+            const currentMessage = directMessagesCache.find(item => item.fbKey === normalizedMessageKey) || null;
+            dmEditState = {
+                conversationKey: normalizedKey,
+                messageKey: normalizedMessageKey,
+                draft: currentMessage && typeof currentMessage.text === 'string' ? currentMessage.text : ''
+            };
+            renderDirectMessages(directMessagesCache);
+            renderDmInbox(dmInboxConversations);
+        }
+
+        function updateDmEditDraft(value) {
+            dmEditState = { ...dmEditState, draft: value };
+        }
+
+        function cancelDmEdit() {
+            dmEditState = { conversationKey: null, messageKey: null, draft: '' };
+            renderDirectMessages(directMessagesCache);
+            renderDmInbox(dmInboxConversations);
+        }
+
+        function saveDmEdit(conversationKey, messageKey) {
+            const normalizedKey = String(conversationKey || '').trim().toLowerCase();
+            const normalizedMessageKey = String(messageKey || '').trim();
+            const cleaned = String(dmEditState.draft || '').trim();
+            if (!normalizedKey || !normalizedMessageKey) return;
+            if (!cleaned) {
+                alert('Message cannot be empty.');
+                return;
+            }
             const path = 'direct_messages/' + normalizedKey + '/' + normalizedMessageKey;
-            database.ref(path).once('value', (snapshot) => {
-                const current = snapshot.val() || {};
-                const nextText = window.prompt('Edit message', current.text || '');
-                if (nextText === null) return;
-                const cleaned = nextText.trim();
-                if (!cleaned) {
-                    alert('Message cannot be empty.');
-                    return;
+            database.ref(path).update({
+                text: cleaned,
+                edited: true
+            }).then(() => {
+                dmEditState = { conversationKey: null, messageKey: null, draft: '' };
+                if (normalizedKey === (claimedSoulTag || localStorage.getItem('archive_soul_tag') || '').trim().toLowerCase()) {
+                    loadDirectMessages();
+                } else {
+                    loadAdminDmInbox();
                 }
-                database.ref(path).update({
-                    text: cleaned,
-                    edited: true
-                }).then(() => {
-                    if (normalizedKey === (claimedSoulTag || localStorage.getItem('archive_soul_tag') || '').trim().toLowerCase()) {
-                        loadDirectMessages();
-                    } else {
-                        loadAdminDmInbox();
-                    }
-                }).catch((err) => {
-                    console.error('DM edit failed:', err);
-                    alert('The message could not be edited right now.');
-                });
+            }).catch((err) => {
+                console.error('DM edit failed:', err);
+                alert('The message could not be edited right now.');
             });
         }
 
@@ -2108,20 +2161,34 @@
                     : message.mediaType === 'audio' && message.mediaUrl
                         ? `<audio class="dm-audio" controls src="${message.mediaUrl}"></audio>`
                         : '';
+                const editingThis = dmEditState.conversationKey === conversationKey && dmEditState.messageKey === message.fbKey;
                 const actionsMarkup = !message.deleted ? `
                     <div class="dm-message-actions">
                         ${message.mediaUrl ? `<button type="button" class="dm-camera-badge" onclick="openDmMedia('${escapeHtml(message.mediaUrl)}', '${escapeHtml(message.mediaType || '')}')" title="Open attachment">📷</button>` : ''}
-                        ${canManageDmMessage(message) ? `<button type="button" class="dm-message-action-btn" onclick="startEditDmMessage('${escapeHtml(conversationKey)}','${escapeHtml(message.fbKey || '')}')">edit</button>` : ''}
+                        ${canManageDmMessage(message) && !editingThis ? `<button type="button" class="dm-message-action-btn" onclick="startEditDmMessage('${escapeHtml(conversationKey)}','${escapeHtml(message.fbKey || '')}')">edit</button>` : ''}
                         ${canManageDmMessage(message) ? `<button type="button" class="dm-message-action-btn" onclick="deleteDmMessage('${escapeHtml(conversationKey)}','${escapeHtml(message.fbKey || '')}')">delete</button>` : ''}
                     </div>
                 ` : '';
+                const bodyMarkup = message.deleted
+                    ? '<div class="dm-deleted">deleted message</div>'
+                    : editingThis
+                        ? `
+                            <div class="dm-edit-box">
+                                <textarea oninput="updateDmEditDraft(this.value)">${escapeHtml(dmEditState.draft || '')}</textarea>
+                                <div class="dm-edit-actions">
+                                    <button type="button" onclick="saveDmEdit('${escapeHtml(conversationKey)}','${escapeHtml(message.fbKey || '')}')">save</button>
+                                    <button type="button" onclick="cancelDmEdit()">cancel</button>
+                                </div>
+                            </div>
+                        `
+                        : `${message.text ? `<div>${escapeHtml(message.text)}</div>` : ''}${mediaMarkup}`;
                 return `
                     <div class="dm-bubble ${isMine ? 'mine' : ''}">
                         <div class="dm-bubble-header">
                             <div class="dm-bubble-meta">${getDmMessageLabel(message, isMine)} • ${new Date(message.timestamp || Date.now()).toLocaleString()}</div>
                             ${actionsMarkup}
                         </div>
-                        ${message.deleted ? '<div class="dm-deleted">deleted message</div>' : `${message.text ? `<div>${escapeHtml(message.text)}</div>` : ''}${mediaMarkup}`}
+                        ${bodyMarkup}
                     </div>
                 `;
             }).join('');
@@ -2144,6 +2211,7 @@
                 const rawMessages = snapshot.val() || {};
                 const ordered = Object.keys(rawMessages).map(itemKey => ({ fbKey: itemKey, ...rawMessages[itemKey] }))
                     .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+                directMessagesCache = ordered;
                 renderDirectMessages(ordered);
             };
             dmMessagesRef.on('value', dmMessagesListener);
@@ -3103,20 +3171,34 @@
                     : message.mediaType === 'audio' && message.mediaUrl
                         ? `<audio class="dm-audio" controls src="${message.mediaUrl}"></audio>`
                         : '';
+                const editingThis = dmEditState.conversationKey === activeConversation.key && dmEditState.messageKey === message.fbKey;
                 const actionsMarkup = !message.deleted ? `
                     <div class="dm-message-actions">
                         ${message.mediaUrl ? `<button type="button" class="dm-camera-badge" onclick="openDmMedia('${escapeHtml(message.mediaUrl)}', '${escapeHtml(message.mediaType || '')}')" title="Open attachment">📷</button>` : ''}
-                        ${canManageDmMessage(message) ? `<button type="button" class="dm-message-action-btn" onclick="startEditDmMessage('${escapeHtml(activeConversation.key)}','${escapeHtml(message.fbKey || '')}')">edit</button>` : ''}
+                        ${canManageDmMessage(message) && !editingThis ? `<button type="button" class="dm-message-action-btn" onclick="startEditDmMessage('${escapeHtml(activeConversation.key)}','${escapeHtml(message.fbKey || '')}')">edit</button>` : ''}
                         ${canManageDmMessage(message) ? `<button type="button" class="dm-message-action-btn" onclick="deleteDmMessage('${escapeHtml(activeConversation.key)}','${escapeHtml(message.fbKey || '')}')">delete</button>` : ''}
                     </div>
                 ` : '';
+                const bodyMarkup = message.deleted
+                    ? '<div class="dm-deleted">deleted message</div>'
+                    : editingThis
+                        ? `
+                            <div class="dm-edit-box">
+                                <textarea oninput="updateDmEditDraft(this.value)">${escapeHtml(dmEditState.draft || '')}</textarea>
+                                <div class="dm-edit-actions">
+                                    <button type="button" onclick="saveDmEdit('${escapeHtml(activeConversation.key)}','${escapeHtml(message.fbKey || '')}')">save</button>
+                                    <button type="button" onclick="cancelDmEdit()">cancel</button>
+                                </div>
+                            </div>
+                        `
+                        : `${message.text ? `<div>${escapeHtml(message.text)}</div>` : ''}${mediaMarkup}`;
                 return `
                     <div class="admin-dm-bubble ${isOutgoing ? 'outgoing' : ''}">
                         <div class="dm-bubble-header">
                             <div class="admin-dm-conversation-preview">${escapeHtml(label)}</div>
                             ${actionsMarkup}
                         </div>
-                        ${message.deleted ? '<div class="dm-deleted">deleted message</div>' : `${message.text ? `<div>${escapeHtml(message.text)}</div>` : ''}${mediaMarkup}`}
+                        ${bodyMarkup}
                         <small>${escapeHtml(message.timestampText || '')}</small>
                     </div>
                 `;
