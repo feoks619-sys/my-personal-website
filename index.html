@@ -2029,7 +2029,10 @@
         }
 
         function startEditDmMessage(conversationKey, messageKey) {
-            const path = 'direct_messages/' + conversationKey + '/' + messageKey;
+            const normalizedKey = String(conversationKey || '').trim().toLowerCase();
+            const normalizedMessageKey = String(messageKey || '').trim();
+            if (!normalizedKey || !normalizedMessageKey) return;
+            const path = 'direct_messages/' + normalizedKey + '/' + normalizedMessageKey;
             database.ref(path).once('value', (snapshot) => {
                 const current = snapshot.val() || {};
                 const nextText = window.prompt('Edit message', current.text || '');
@@ -2039,11 +2042,12 @@
                     alert('Message cannot be empty.');
                     return;
                 }
-                database.ref(path).update({
+                database.ref(path).set({
+                    ...current,
                     text: cleaned,
                     edited: true
                 }).then(() => {
-                    if (conversationKey === (claimedSoulTag || localStorage.getItem('archive_soul_tag') || '').trim().toLowerCase()) {
+                    if (normalizedKey === (claimedSoulTag || localStorage.getItem('archive_soul_tag') || '').trim().toLowerCase()) {
                         loadDirectMessages();
                     } else {
                         loadAdminDmInbox();
@@ -2052,21 +2056,36 @@
             });
         }
 
+        function canManageDmMessage(message) {
+            if (!message || message.deleted) return false;
+            if (isAdminLoggedIn) {
+                return message.from === 'admin';
+            }
+            return message.from === 'user';
+        }
+
         function deleteDmMessage(conversationKey, messageKey) {
             if (!window.confirm('Delete this message?')) return;
-            const path = 'direct_messages/' + conversationKey + '/' + messageKey;
-            database.ref(path).update({
-                deleted: true,
-                deletedAt: Date.now(),
-                text: 'deleted message',
-                mediaUrl: '',
-                mediaType: null
-            }).then(() => {
-                if (conversationKey === (claimedSoulTag || localStorage.getItem('archive_soul_tag') || '').trim().toLowerCase()) {
-                    loadDirectMessages();
-                } else {
-                    loadAdminDmInbox();
-                }
+            const normalizedKey = String(conversationKey || '').trim().toLowerCase();
+            const normalizedMessageKey = String(messageKey || '').trim();
+            if (!normalizedKey || !normalizedMessageKey) return;
+            const path = 'direct_messages/' + normalizedKey + '/' + normalizedMessageKey;
+            database.ref(path).once('value', (snapshot) => {
+                const current = snapshot.val() || {};
+                database.ref(path).set({
+                    ...current,
+                    deleted: true,
+                    deletedAt: Date.now(),
+                    text: 'deleted message',
+                    mediaUrl: '',
+                    mediaType: null
+                }).then(() => {
+                    if (normalizedKey === (claimedSoulTag || localStorage.getItem('archive_soul_tag') || '').trim().toLowerCase()) {
+                        loadDirectMessages();
+                    } else {
+                        loadAdminDmInbox();
+                    }
+                });
             });
         }
 
@@ -2087,9 +2106,9 @@
                         : '';
                 const actionsMarkup = !message.deleted ? `
                     <div class="dm-message-actions">
-                        ${message.mediaUrl ? `<button type="button" class="dm-camera-badge" onclick="openDmMedia('${encodeURIComponent(message.mediaUrl)}', '${encodeURIComponent(message.mediaType || '')}')" title="Open attachment">📷</button>` : ''}
-                        <button type="button" class="dm-message-action-btn" onclick="startEditDmMessage('${encodeURIComponent(conversationKey)}', '${encodeURIComponent(message.fbKey || '')}')" title="Edit">✎</button>
-                        <button type="button" class="dm-message-action-btn" onclick="deleteDmMessage('${encodeURIComponent(conversationKey)}', '${encodeURIComponent(message.fbKey || '')}')" title="Delete">🗑️</button>
+                        ${message.mediaUrl ? `<button type="button" class="dm-camera-badge" onclick="openDmMedia('${message.mediaUrl}', '${message.mediaType || ''}')" title="Open attachment">📷</button>` : ''}
+                        ${canManageDmMessage(message) ? `<button type="button" class="dm-message-action-btn" onclick="startEditDmMessage(${JSON.stringify(conversationKey)}, ${JSON.stringify(message.fbKey || '')})">edit</button>` : ''}
+                        ${canManageDmMessage(message) ? `<button type="button" class="dm-message-action-btn" onclick="deleteDmMessage(${JSON.stringify(conversationKey)}, ${JSON.stringify(message.fbKey || '')})">delete</button>` : ''}
                     </div>
                 ` : '';
                 return `
@@ -3082,9 +3101,9 @@
                         : '';
                 const actionsMarkup = !message.deleted ? `
                     <div class="dm-message-actions">
-                        ${message.mediaUrl ? `<button type="button" class="dm-camera-badge" onclick="openDmMedia('${encodeURIComponent(message.mediaUrl)}', '${encodeURIComponent(message.mediaType || '')}')" title="Open attachment">📷</button>` : ''}
-                        <button type="button" class="dm-message-action-btn" onclick="startEditDmMessage('${encodeURIComponent(activeConversation.key)}', '${encodeURIComponent(message.fbKey || '')}')" title="Edit">✎</button>
-                        <button type="button" class="dm-message-action-btn" onclick="deleteDmMessage('${encodeURIComponent(activeConversation.key)}', '${encodeURIComponent(message.fbKey || '')}')" title="Delete">🗑️</button>
+                        ${message.mediaUrl ? `<button type="button" class="dm-camera-badge" onclick="openDmMedia('${message.mediaUrl}', '${message.mediaType || ''}')" title="Open attachment">📷</button>` : ''}
+                        ${canManageDmMessage(message) ? `<button type="button" class="dm-message-action-btn" onclick="startEditDmMessage(${JSON.stringify(activeConversation.key)}, ${JSON.stringify(message.fbKey || '')})">edit</button>` : ''}
+                        ${canManageDmMessage(message) ? `<button type="button" class="dm-message-action-btn" onclick="deleteDmMessage(${JSON.stringify(activeConversation.key)}, ${JSON.stringify(message.fbKey || '')})">delete</button>` : ''}
                     </div>
                 ` : '';
                 return `
