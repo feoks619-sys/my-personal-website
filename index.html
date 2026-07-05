@@ -909,6 +909,30 @@
             background: #fffdf4;
             color: #3d2200;
         }
+        .admin-dm-attachment-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+            padding: 0 12px 10px;
+            background: rgba(255,248,220,0.8);
+        }
+        .admin-dm-attach-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 8px;
+            border-radius: 999px;
+            border: 1px solid rgba(181, 123, 22, 0.25);
+            background: #fffdf4;
+            color: #3d2200;
+            font-size: 0.78rem;
+            cursor: pointer;
+        }
+        .admin-dm-attachment-name {
+            font-size: 0.74rem;
+            color: #7a5520;
+        }
         .admin-dm-reply-box button {
             border: none;
             border-radius: 10px;
@@ -1834,6 +1858,17 @@
             <div class="admin-dm-thread">
                 <div id="admin-dm-thread-header" class="admin-dm-thread-header"></div>
                 <div id="admin-dm-thread-body" class="admin-dm-thread-body"></div>
+                <div class="admin-dm-attachment-row">
+                    <label class="admin-dm-attach-btn">
+                        📷 photo
+                        <input id="admin-dm-photo-input" type="file" accept="image/*" onchange="handleAdminDmAttachmentSelect('image')" style="display:none;">
+                    </label>
+                    <label class="admin-dm-attach-btn">
+                        🎙️ voicemail
+                        <input id="admin-dm-audio-input" type="file" accept="audio/*" onchange="handleAdminDmAttachmentSelect('audio')" style="display:none;">
+                    </label>
+                    <div id="admin-dm-attachment-name" class="admin-dm-attachment-name">No attachment</div>
+                </div>
                 <div class="admin-dm-reply-box">
                     <textarea id="admin-dm-reply-input" placeholder="reply to this whisper..."></textarea>
                     <button type="button" onclick="sendAdminDmReply()">reply</button>
@@ -1920,6 +1955,9 @@
         let editingPostDraft = "";
         let dmInboxConversations = [];
         let selectedDmKey = null;
+        let adminDmPendingAttachment = null;
+        let adminDmPendingAttachmentType = null;
+        let adminDmPendingAttachmentName = "";
 
         function normalizePostsPayload(data) {
             if (!data || typeof data !== 'object') {
@@ -1985,6 +2023,53 @@
             return tag || 'user';
         }
 
+        function openDmMedia(mediaUrl, mediaType) {
+            if (!mediaUrl) return;
+            window.open(mediaUrl, '_blank', 'noopener,noreferrer');
+        }
+
+        function startEditDmMessage(conversationKey, messageKey) {
+            const path = 'direct_messages/' + conversationKey + '/' + messageKey;
+            database.ref(path).once('value', (snapshot) => {
+                const current = snapshot.val() || {};
+                const nextText = window.prompt('Edit message', current.text || '');
+                if (nextText === null) return;
+                const cleaned = nextText.trim();
+                if (!cleaned) {
+                    alert('Message cannot be empty.');
+                    return;
+                }
+                database.ref(path).update({
+                    text: cleaned,
+                    edited: true
+                }).then(() => {
+                    if (conversationKey === (claimedSoulTag || localStorage.getItem('archive_soul_tag') || '').trim().toLowerCase()) {
+                        loadDirectMessages();
+                    } else {
+                        loadAdminDmInbox();
+                    }
+                });
+            });
+        }
+
+        function deleteDmMessage(conversationKey, messageKey) {
+            if (!window.confirm('Delete this message?')) return;
+            const path = 'direct_messages/' + conversationKey + '/' + messageKey;
+            database.ref(path).update({
+                deleted: true,
+                deletedAt: Date.now(),
+                text: 'deleted message',
+                mediaUrl: '',
+                mediaType: null
+            }).then(() => {
+                if (conversationKey === (claimedSoulTag || localStorage.getItem('archive_soul_tag') || '').trim().toLowerCase()) {
+                    loadDirectMessages();
+                } else {
+                    loadAdminDmInbox();
+                }
+            });
+        }
+
         function renderDirectMessages(messages) {
             const container = document.getElementById('dm-messages');
             if (!container) return;
@@ -1994,16 +2079,26 @@
             }
             container.innerHTML = messages.map(message => {
                 const isMine = message.from === 'user';
+                const conversationKey = (claimedSoulTag || localStorage.getItem('archive_soul_tag') || '').trim().toLowerCase();
                 const mediaMarkup = message.mediaType === 'image' && message.mediaUrl
                     ? `<img class="dm-media" src="${message.mediaUrl}" alt="shared memory">`
                     : message.mediaType === 'audio' && message.mediaUrl
                         ? `<audio class="dm-audio" controls src="${message.mediaUrl}"></audio>`
                         : '';
+                const actionsMarkup = !message.deleted ? `
+                    <div class="dm-message-actions">
+                        ${message.mediaUrl ? `<button type="button" class="dm-camera-badge" onclick="openDmMedia('${encodeURIComponent(message.mediaUrl)}', '${encodeURIComponent(message.mediaType || '')}')" title="Open attachment">📷</button>` : ''}
+                        <button type="button" class="dm-message-action-btn" onclick="startEditDmMessage('${encodeURIComponent(conversationKey)}', '${encodeURIComponent(message.fbKey || '')}')" title="Edit">✎</button>
+                        <button type="button" class="dm-message-action-btn" onclick="deleteDmMessage('${encodeURIComponent(conversationKey)}', '${encodeURIComponent(message.fbKey || '')}')" title="Delete">🗑️</button>
+                    </div>
+                ` : '';
                 return `
                     <div class="dm-bubble ${isMine ? 'mine' : ''}">
-                        <div class="dm-bubble-meta">${getDmMessageLabel(message, isMine)} • ${new Date(message.timestamp || Date.now()).toLocaleString()}</div>
-                        ${message.text ? `<div>${escapeHtml(message.text)}</div>` : ''}
-                        ${mediaMarkup}
+                        <div class="dm-bubble-header">
+                            <div class="dm-bubble-meta">${getDmMessageLabel(message, isMine)} • ${new Date(message.timestamp || Date.now()).toLocaleString()}</div>
+                            ${actionsMarkup}
+                        </div>
+                        ${message.deleted ? '<div class="dm-deleted">deleted message</div>' : `${message.text ? `<div>${escapeHtml(message.text)}</div>` : ''}${mediaMarkup}`}
                     </div>
                 `;
             }).join('');
@@ -2070,6 +2165,17 @@
             if (label) label.textContent = 'Attached: ' + file.name;
         }
 
+        function handleAdminDmAttachmentSelect(type) {
+            const input = type === 'image' ? document.getElementById('admin-dm-photo-input') : document.getElementById('admin-dm-audio-input');
+            if (!input || !input.files || !input.files[0]) return;
+            const file = input.files[0];
+            adminDmPendingAttachment = file;
+            adminDmPendingAttachmentType = type;
+            adminDmPendingAttachmentName = file.name;
+            const label = document.getElementById('admin-dm-attachment-name');
+            if (label) label.textContent = 'Attached: ' + file.name;
+        }
+
         function clearDmAttachment() {
             dmPendingAttachment = null;
             dmPendingAttachmentType = null;
@@ -2078,6 +2184,18 @@
             if (label) label.textContent = 'No attachment';
             const photoInput = document.getElementById('dm-photo-input');
             const audioInput = document.getElementById('dm-audio-input');
+            if (photoInput) photoInput.value = '';
+            if (audioInput) audioInput.value = '';
+        }
+
+        function clearAdminDmAttachment() {
+            adminDmPendingAttachment = null;
+            adminDmPendingAttachmentType = null;
+            adminDmPendingAttachmentName = '';
+            const label = document.getElementById('admin-dm-attachment-name');
+            if (label) label.textContent = 'No attachment';
+            const photoInput = document.getElementById('admin-dm-photo-input');
+            const audioInput = document.getElementById('admin-dm-audio-input');
             if (photoInput) photoInput.value = '';
             if (audioInput) audioInput.value = '';
         }
@@ -2957,12 +3075,25 @@
             body.innerHTML = (activeConversation.messages || []).map(message => {
                 const isOutgoing = message.from === 'admin';
                 const label = getDmMessageLabel(message, !isOutgoing);
+                const mediaMarkup = message.mediaType === 'image' && message.mediaUrl
+                    ? `<img class="dm-media" src="${message.mediaUrl}" alt="shared memory">`
+                    : message.mediaType === 'audio' && message.mediaUrl
+                        ? `<audio class="dm-audio" controls src="${message.mediaUrl}"></audio>`
+                        : '';
+                const actionsMarkup = !message.deleted ? `
+                    <div class="dm-message-actions">
+                        ${message.mediaUrl ? `<button type="button" class="dm-camera-badge" onclick="openDmMedia('${encodeURIComponent(message.mediaUrl)}', '${encodeURIComponent(message.mediaType || '')}')" title="Open attachment">📷</button>` : ''}
+                        <button type="button" class="dm-message-action-btn" onclick="startEditDmMessage('${encodeURIComponent(activeConversation.key)}', '${encodeURIComponent(message.fbKey || '')}')" title="Edit">✎</button>
+                        <button type="button" class="dm-message-action-btn" onclick="deleteDmMessage('${encodeURIComponent(activeConversation.key)}', '${encodeURIComponent(message.fbKey || '')}')" title="Delete">🗑️</button>
+                    </div>
+                ` : '';
                 return `
                     <div class="admin-dm-bubble ${isOutgoing ? 'outgoing' : ''}">
-                        <div class="admin-dm-conversation-preview">${escapeHtml(label)}</div>
-                        ${message.text ? `<div>${escapeHtml(message.text)}</div>` : ''}
-                        ${message.mediaType === 'image' && message.mediaUrl ? `<img class="dm-media" src="${message.mediaUrl}" alt="shared memory">` : ''}
-                        ${message.mediaType === 'audio' && message.mediaUrl ? `<audio class="dm-audio" controls src="${message.mediaUrl}"></audio>` : ''}
+                        <div class="dm-bubble-header">
+                            <div class="admin-dm-conversation-preview">${escapeHtml(label)}</div>
+                            ${actionsMarkup}
+                        </div>
+                        ${message.deleted ? '<div class="dm-deleted">deleted message</div>' : `${message.text ? `<div>${escapeHtml(message.text)}</div>` : ''}${mediaMarkup}`}
                         <small>${escapeHtml(message.timestampText || '')}</small>
                     </div>
                 `;
@@ -2991,20 +3122,36 @@
             if (!selectedDmKey) return;
             const input = document.getElementById('admin-dm-reply-input');
             const text = (input ? input.value : '').trim();
-            if (!text) {
-                alert('Write a reply before sending.');
+            if (!text && !adminDmPendingAttachment) {
+                alert('Write a reply or attach a photo or voicemail first.');
                 return;
             }
-            database.ref('direct_messages/' + selectedDmKey).push({
-                from: 'admin',
-                userTag: 'admin',
-                text,
-                mediaUrl: '',
-                mediaType: null,
-                timestamp: Date.now()
-            }).then(() => {
-                if (input) input.value = '';
-                loadAdminDmInbox();
+            const sendPayload = (mediaUrl, mediaType) => {
+                database.ref('direct_messages/' + selectedDmKey).push({
+                    from: 'admin',
+                    userTag: 'The Keeper',
+                    text: text || '',
+                    mediaUrl: mediaUrl || '',
+                    mediaType: mediaType || null,
+                    timestamp: Date.now(),
+                    isOfficial: true
+                }).then(() => {
+                    if (input) input.value = '';
+                    clearAdminDmAttachment();
+                    loadAdminDmInbox();
+                });
+            };
+            if (!adminDmPendingAttachment) {
+                sendPayload('', null);
+                return;
+            }
+            const storagePath = 'direct_messages/' + selectedDmKey + '/' + Date.now() + '_' + adminDmPendingAttachmentName.replace(/\s+/g, '_');
+            const uploadTask = firebase.storage().ref(storagePath).put(adminDmPendingAttachment);
+            uploadTask.then(snapshot => snapshot.ref.getDownloadURL()).then(url => {
+                sendPayload(url, adminDmPendingAttachmentType === 'image' ? 'image' : 'audio');
+            }).catch(err => {
+                console.warn('Admin DM upload failed:', err);
+                alert('Your attachment could not be sent right now.');
             });
         }
 
@@ -3012,7 +3159,8 @@
             database.ref('direct_messages').once('value', (snapshot) => {
                 const data = snapshot.val() || {};
                 const conversations = Object.keys(data).map(key => {
-                    const messages = Object.values(data[key] || {}).filter(Boolean);
+                    const messageEntries = Object.entries(data[key] || {}).filter(([, value]) => Boolean(value));
+                    const messages = messageEntries.map(([messageKey, value]) => ({ fbKey: messageKey, ...value }));
                     const sortedMessages = messages.slice().sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
                     const lastMessage = sortedMessages[sortedMessages.length - 1] || null;
                     const participantMessage = sortedMessages.find(message => message.from === 'user');
@@ -3023,7 +3171,7 @@
                             ...message,
                             timestampText: message.timestamp ? new Date(message.timestamp).toLocaleString() : ''
                         })),
-                        lastMessageText: lastMessage ? (lastMessage.text || (lastMessage.mediaType === 'image' ? '[photo]' : lastMessage.mediaType === 'audio' ? '[voicemail]' : '')) : 'No messages yet',
+                        lastMessageText: lastMessage ? (lastMessage.deleted ? 'deleted message' : lastMessage.text || (lastMessage.mediaType === 'image' ? '[photo]' : lastMessage.mediaType === 'audio' ? '[voicemail]' : '')) : 'No messages yet',
                         lastMessageTime: lastMessage && lastMessage.timestamp ? new Date(lastMessage.timestamp).toLocaleString() : ''
                     };
                 }).sort((a, b) => (b.messages[b.messages.length - 1]?.timestamp || 0) - (a.messages[a.messages.length - 1]?.timestamp || 0));
