@@ -9,8 +9,27 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
+    <meta name="app-version" content="20260705-2">
     <!-- Bump the typed.js query to force reload when we update the page -->
     <script src="https://unpkg.com/typed.js@2.1.0/dist/typed.umd.js?v=2"></script>
+    <script>
+        (function () {
+            try {
+                const appVersion = '20260705-2';
+                const currentUrl = new URL(window.location.href);
+                const storedVersion = localStorage.getItem('archive_app_version');
+                if (storedVersion !== appVersion || !currentUrl.searchParams.get('v')) {
+                    localStorage.setItem('archive_app_version', appVersion);
+                    currentUrl.searchParams.set('v', appVersion);
+                    if (currentUrl.search !== window.location.search) {
+                        window.location.replace(currentUrl.toString());
+                    }
+                }
+            } catch (err) {
+                console.warn('Version check failed:', err);
+            }
+        })();
+    </script>
 
     <style>
         /* BASE STYLE: Deep Bleachers Red */
