@@ -14,7 +14,7 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 
 const messaging = firebase.messaging();
-const CACHE_NAME = 'archive-site-v20260705-2';
+const CACHE_NAME = 'archive-site-v20260705-4';
 const APP_HTML = new URL('./index.html', self.registration.scope).toString();
 
 self.addEventListener('install', event => {
