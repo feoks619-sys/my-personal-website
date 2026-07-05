@@ -755,74 +755,119 @@
             color: #4a3f35;
         }
 
-        .dm-inbox-shell {
+        .admin-dm-toggle {
+            position: fixed;
+            top: 210px;
+            right: 20px;
+            z-index: 1006;
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            border: 1px solid #e3b63a;
+            background: linear-gradient(145deg, #fff8dc, #f1d79b);
+            color: #3d2200;
+            font-size: 1.3rem;
+            cursor: pointer;
+            box-shadow: 0 14px 34px rgba(0,0,0,0.15);
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        .admin-dm-toggle:hover { transform: translateY(-2px); }
+        .admin-dm-sidebar {
+            position: fixed;
+            top: 0;
+            right: 0;
+            width: min(420px, 92vw);
+            height: 100vh;
+            background: linear-gradient(180deg, rgba(255,248,220,0.98), rgba(246,225,175,0.98));
+            color: #3d2200;
+            border-left: 1px solid rgba(181, 123, 22, 0.24);
+            box-shadow: -16px 0 38px rgba(0,0,0,0.2);
+            z-index: 1007;
+            transform: translateX(102%);
+            transition: transform 0.24s ease;
             display: flex;
-            gap: 14px;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .admin-dm-sidebar.open {
+            transform: translateX(0);
+        }
+        .admin-dm-sidebar-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 18px;
+            border-bottom: 1px solid rgba(181, 123, 22, 0.2);
+            background: rgba(255, 240, 191, 0.82);
+        }
+        .admin-dm-sidebar-body {
+            display: flex;
             flex: 1;
             min-height: 0;
             overflow: hidden;
         }
-        .dm-inbox-list {
-            width: 320px;
-            max-width: 34vw;
-            min-width: 250px;
-            border-right: 1px solid rgba(181, 123, 22, 0.22);
+        .admin-dm-list {
+            width: 132px;
+            min-width: 132px;
+            border-right: 1px solid rgba(181, 123, 22, 0.2);
             overflow-y: auto;
-            padding-right: 8px;
+            padding: 10px 8px;
+            background: rgba(255,248,220,0.8);
         }
-        .dm-conversation-item {
+        .admin-dm-conversation-item {
             width: 100%;
             text-align: left;
-            border: 1px solid rgba(181, 123, 22, 0.18);
-            border-radius: 12px;
-            background: rgba(255, 250, 235, 0.95);
-            padding: 10px 12px;
+            border: 1px solid rgba(181, 123, 22, 0.16);
+            border-radius: 10px;
+            background: #fffdf4;
+            padding: 8px;
             margin-bottom: 8px;
             cursor: pointer;
-            box-shadow: 0 6px 14px rgba(0,0,0,0.04);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.04);
         }
-        .dm-conversation-item.active {
+        .admin-dm-conversation-item.active {
             border-color: #b57b16;
-            background: #fff1c7;
+            background: #ffe8b0;
         }
-        .dm-conversation-name {
+        .admin-dm-conversation-name {
+            font-size: 0.82rem;
             font-weight: 700;
             color: #3d2200;
             margin-bottom: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
-        .dm-conversation-preview {
-            font-size: 0.82rem;
+        .admin-dm-conversation-preview {
+            font-size: 0.72rem;
             color: #6f5224;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
         }
-        .dm-conversation-meta {
-            font-size: 0.72rem;
-            color: #8d6d2a;
-            margin-top: 4px;
-        }
-        .dm-chat-panel {
+        .admin-dm-thread {
             flex: 1;
             display: flex;
             flex-direction: column;
             min-width: 0;
             overflow: hidden;
         }
-        .dm-chat-header {
-            padding: 8px 0 12px;
-            border-bottom: 1px solid rgba(181, 123, 22, 0.22);
-            margin-bottom: 8px;
+        .admin-dm-thread-header {
+            padding: 12px 12px 8px;
+            border-bottom: 1px solid rgba(181, 123, 22, 0.16);
+            background: rgba(255,248,220,0.8);
         }
-        .dm-chat-body {
+        .admin-dm-thread-body {
             flex: 1;
             overflow-y: auto;
-            padding-right: 6px;
+            padding: 10px 12px;
             display: flex;
             flex-direction: column;
             gap: 8px;
         }
-        .dm-chat-empty {
+        .admin-dm-thread-empty {
             margin: auto;
             color: #7a5520;
             text-align: center;
@@ -830,20 +875,48 @@
             border: 1px dashed rgba(181, 123, 22, 0.25);
             border-radius: 12px;
         }
-        .dm-chat-bubble {
-            max-width: 84%;
+        .admin-dm-bubble {
+            max-width: 86%;
             padding: 10px 12px;
             border-radius: 12px;
             background: #fffdfa;
             border: 1px solid rgba(181, 123, 22, 0.16);
-            box-shadow: 0 6px 14px rgba(0,0,0,0.04);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.04);
+            align-self: flex-start;
         }
-        .dm-chat-bubble.mine {
+        .admin-dm-bubble.outgoing {
             align-self: flex-end;
             background: #3d2200;
             color: #fff8dc;
         }
-        .dm-chat-bubble small { display: block; margin-top: 6px; opacity: 0.78; }
+        .admin-dm-bubble small { display: block; margin-top: 6px; opacity: 0.78; }
+        .admin-dm-reply-box {
+            display: flex;
+            gap: 8px;
+            padding: 10px 12px 12px;
+            border-top: 1px solid rgba(181, 123, 22, 0.16);
+            background: rgba(255,248,220,0.8);
+        }
+        .admin-dm-reply-box textarea {
+            flex: 1;
+            min-height: 42px;
+            max-height: 96px;
+            resize: vertical;
+            border: 1px solid rgba(181, 123, 22, 0.25);
+            border-radius: 10px;
+            padding: 8px 10px;
+            font: inherit;
+            background: #fffdf4;
+            color: #3d2200;
+        }
+        .admin-dm-reply-box button {
+            border: none;
+            border-radius: 10px;
+            background: #3d2200;
+            color: #fff8dc;
+            padding: 0 12px;
+            cursor: pointer;
+        }
 
         .trash-tabs {
             display: flex;
@@ -1701,7 +1774,6 @@
                         <button id="trash-tab-comments" class="trash-tab active" onclick="selectTrashTab('comments')">Comments <span id="badge-comments" class="tab-badge" style="display:none">0</span></button>
                         <button id="trash-tab-likes" class="trash-tab" onclick="selectTrashTab('likes')">Likes <span id="badge-likes" class="tab-badge" style="display:none">0</span></button>
                         <button id="trash-tab-users" class="trash-tab" onclick="selectTrashTab('users')">Users <span id="badge-users" class="tab-badge" style="display:none">0</span></button>
-                        <button id="trash-tab-dms" class="trash-tab" onclick="selectTrashTab('dms')">DMs</button>
                     </div>
                     <div id="trash-comments-view" class="trash-panel-view active">
                         <div class="trash-category-title">💬 Deleted comments</div>
@@ -1714,16 +1786,6 @@
                     <div id="trash-users-view" class="trash-panel-view">
                         <div class="trash-category-title">🧑‍💻 User tags</div>
                         <div id="trash-users-list" class="trash-list"></div>
-                    </div>
-                    <div id="trash-dms-view" class="trash-panel-view">
-                        <div class="trash-category-title">💌 Private whispers inbox</div>
-                        <div id="dm-inbox-shell" class="dm-inbox-shell">
-                            <div id="dm-inbox-list" class="dm-inbox-list"></div>
-                            <div class="dm-chat-panel">
-                                <div id="dm-chat-header" class="dm-chat-header"></div>
-                                <div id="dm-chat-body" class="dm-chat-body"></div>
-                            </div>
-                        </div>
                     </div>
                 </div>
             </div>
@@ -1755,6 +1817,29 @@
         </div>
 
         <div id="stream-list" class="feed-container"></div>
+    </div>
+
+    <button id="admin-dm-toggle" class="admin-dm-toggle" type="button" onclick="toggleAdminDmSidebar()" aria-label="private messages" style="display:none;">☰</button>
+
+    <div id="admin-dm-sidebar" class="admin-dm-sidebar" aria-hidden="true">
+        <div class="admin-dm-sidebar-header">
+            <div>
+                <div class="dm-title">// private whispers</div>
+                <div class="dm-subtitle">keep your conversations organized</div>
+            </div>
+            <button type="button" class="dm-close-btn" onclick="toggleAdminDmSidebar()">✕</button>
+        </div>
+        <div class="admin-dm-sidebar-body">
+            <div id="admin-dm-list" class="admin-dm-list"></div>
+            <div class="admin-dm-thread">
+                <div id="admin-dm-thread-header" class="admin-dm-thread-header"></div>
+                <div id="admin-dm-thread-body" class="admin-dm-thread-body"></div>
+                <div class="admin-dm-reply-box">
+                    <textarea id="admin-dm-reply-input" placeholder="reply to this whisper..."></textarea>
+                    <button type="button" onclick="sendAdminDmReply()">reply</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <button id="dm-fab" class="dm-fab" type="button" onclick="openDirectMessages()" aria-label="private messages" style="display:none;">
@@ -2634,6 +2719,7 @@
                     livePanel.setAttribute('aria-hidden', 'true');
                 }
                 document.getElementById('my-writing-desk').style.display = 'block';
+                document.getElementById('admin-dm-toggle').style.display = 'flex';
                 document.getElementById('backdoor').classList.remove('reveal');
                 document.getElementById('admin-pass').value = ""; 
                 document.getElementById('admin-trash-console').classList.add('show');
@@ -2665,7 +2751,6 @@
             if (open) {
                 selectTrashTab('comments');
                 loadAdminTrashData();
-                loadAdminDmInbox();
                 startTrashAutoRefresh();
             } else {
                 stopTrashAutoRefresh();
@@ -2798,7 +2883,7 @@
         }
 
         function selectTrashTab(tab) {
-            const tabs = ['comments', 'likes', 'users', 'dms'];
+            const tabs = ['comments', 'likes', 'users'];
             tabs.forEach(name => {
                 const tabButton = document.getElementById('trash-tab-' + name);
                 const view = document.getElementById('trash-' + name + '-view');
@@ -2827,15 +2912,15 @@
         }
 
         function renderDmInbox(conversations) {
-            const list = document.getElementById('dm-inbox-list');
-            const header = document.getElementById('dm-chat-header');
-            const body = document.getElementById('dm-chat-body');
+            const list = document.getElementById('admin-dm-list');
+            const header = document.getElementById('admin-dm-thread-header');
+            const body = document.getElementById('admin-dm-thread-body');
             if (!list || !header || !body) return;
 
             if (!conversations || conversations.length === 0) {
                 list.innerHTML = '<div class="trash-item">No private whispers yet.</div>';
-                header.innerHTML = '<div class="dm-chat-empty">Select a conversation to read it.</div>';
-                body.innerHTML = '<div class="dm-chat-empty">Your inbox will appear here.</div>';
+                header.innerHTML = '<div class="admin-dm-thread-empty">Select a conversation to read it.</div>';
+                body.innerHTML = '<div class="admin-dm-thread-empty">Your inbox will appear here.</div>';
                 return;
             }
 
@@ -2843,10 +2928,9 @@
                 const previewText = (entry.lastMessageText || 'shared a memory').replace(/\s+/g, ' ').trim();
                 const isActive = entry.key === selectedDmKey;
                 return `
-                    <button type="button" class="dm-conversation-item ${isActive ? 'active' : ''}" onclick="openDmConversation('${entry.key}')">
-                        <div class="dm-conversation-name">${escapeHtml(entry.displayName || entry.key)}</div>
-                        <div class="dm-conversation-preview">${escapeHtml(previewText)}</div>
-                        <div class="dm-conversation-meta">${escapeHtml(entry.lastMessageTime || '')}</div>
+                    <button type="button" class="admin-dm-conversation-item ${isActive ? 'active' : ''}" onclick="openDmConversation('${entry.key}')">
+                        <div class="admin-dm-conversation-name">${escapeHtml(entry.displayName || entry.key)}</div>
+                        <div class="admin-dm-conversation-preview">${escapeHtml(previewText)}</div>
                     </button>
                 `;
             }).join('');
@@ -2858,11 +2942,11 @@
             const activeConversation = conversations.find(item => item.key === selectedDmKey) || conversations[0];
             if (!activeConversation) return;
             header.innerHTML = `
-                <div class="dm-conversation-name">${escapeHtml(activeConversation.displayName || activeConversation.key)}</div>
-                <div class="dm-conversation-preview">${escapeHtml(activeConversation.lastMessageTime || '')}</div>
+                <div class="admin-dm-conversation-name">${escapeHtml(activeConversation.displayName || activeConversation.key)}</div>
+                <div class="admin-dm-conversation-preview">${escapeHtml(activeConversation.lastMessageTime || '')}</div>
             `;
             body.innerHTML = (activeConversation.messages || []).map(message => `
-                <div class="dm-chat-bubble ${message.from === 'user' ? 'mine' : ''}">
+                <div class="admin-dm-bubble ${message.from === 'admin' ? 'outgoing' : ''}">
                     ${message.text ? `<div>${escapeHtml(message.text)}</div>` : ''}
                     ${message.mediaType === 'image' && message.mediaUrl ? `<img class="dm-media" src="${message.mediaUrl}" alt="shared memory">` : ''}
                     ${message.mediaType === 'audio' && message.mediaUrl ? `<audio class="dm-audio" controls src="${message.mediaUrl}"></audio>` : ''}
@@ -2870,13 +2954,44 @@
                 </div>
             `).join('');
             if (!activeConversation.messages || activeConversation.messages.length === 0) {
-                body.innerHTML = '<div class="dm-chat-empty">No messages in this whisper thread yet.</div>';
+                body.innerHTML = '<div class="admin-dm-thread-empty">No messages in this whisper thread yet.</div>';
             }
         }
 
         function openDmConversation(key) {
             selectedDmKey = key;
             renderDmInbox(dmInboxConversations);
+        }
+
+        function toggleAdminDmSidebar() {
+            const panel = document.getElementById('admin-dm-sidebar');
+            if (!panel) return;
+            const open = panel.classList.toggle('open');
+            panel.setAttribute('aria-hidden', String(!open));
+            if (open) {
+                loadAdminDmInbox();
+            }
+        }
+
+        function sendAdminDmReply() {
+            if (!selectedDmKey) return;
+            const input = document.getElementById('admin-dm-reply-input');
+            const text = (input ? input.value : '').trim();
+            if (!text) {
+                alert('Write a reply before sending.');
+                return;
+            }
+            database.ref('direct_messages/' + selectedDmKey).push({
+                from: 'admin',
+                userTag: 'admin',
+                text,
+                mediaUrl: '',
+                mediaType: null,
+                timestamp: Date.now()
+            }).then(() => {
+                if (input) input.value = '';
+                loadAdminDmInbox();
+            });
         }
 
         function loadAdminDmInbox() {
