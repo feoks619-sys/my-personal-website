@@ -755,6 +755,96 @@
             color: #4a3f35;
         }
 
+        .dm-inbox-shell {
+            display: flex;
+            gap: 14px;
+            flex: 1;
+            min-height: 0;
+            overflow: hidden;
+        }
+        .dm-inbox-list {
+            width: 320px;
+            max-width: 34vw;
+            min-width: 250px;
+            border-right: 1px solid rgba(181, 123, 22, 0.22);
+            overflow-y: auto;
+            padding-right: 8px;
+        }
+        .dm-conversation-item {
+            width: 100%;
+            text-align: left;
+            border: 1px solid rgba(181, 123, 22, 0.18);
+            border-radius: 12px;
+            background: rgba(255, 250, 235, 0.95);
+            padding: 10px 12px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            box-shadow: 0 6px 14px rgba(0,0,0,0.04);
+        }
+        .dm-conversation-item.active {
+            border-color: #b57b16;
+            background: #fff1c7;
+        }
+        .dm-conversation-name {
+            font-weight: 700;
+            color: #3d2200;
+            margin-bottom: 4px;
+        }
+        .dm-conversation-preview {
+            font-size: 0.82rem;
+            color: #6f5224;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .dm-conversation-meta {
+            font-size: 0.72rem;
+            color: #8d6d2a;
+            margin-top: 4px;
+        }
+        .dm-chat-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            overflow: hidden;
+        }
+        .dm-chat-header {
+            padding: 8px 0 12px;
+            border-bottom: 1px solid rgba(181, 123, 22, 0.22);
+            margin-bottom: 8px;
+        }
+        .dm-chat-body {
+            flex: 1;
+            overflow-y: auto;
+            padding-right: 6px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .dm-chat-empty {
+            margin: auto;
+            color: #7a5520;
+            text-align: center;
+            padding: 16px;
+            border: 1px dashed rgba(181, 123, 22, 0.25);
+            border-radius: 12px;
+        }
+        .dm-chat-bubble {
+            max-width: 84%;
+            padding: 10px 12px;
+            border-radius: 12px;
+            background: #fffdfa;
+            border: 1px solid rgba(181, 123, 22, 0.16);
+            box-shadow: 0 6px 14px rgba(0,0,0,0.04);
+        }
+        .dm-chat-bubble.mine {
+            align-self: flex-end;
+            background: #3d2200;
+            color: #fff8dc;
+        }
+        .dm-chat-bubble small { display: block; margin-top: 6px; opacity: 0.78; }
+
         .trash-tabs {
             display: flex;
             gap: 8px;
@@ -1611,6 +1701,7 @@
                         <button id="trash-tab-comments" class="trash-tab active" onclick="selectTrashTab('comments')">Comments <span id="badge-comments" class="tab-badge" style="display:none">0</span></button>
                         <button id="trash-tab-likes" class="trash-tab" onclick="selectTrashTab('likes')">Likes <span id="badge-likes" class="tab-badge" style="display:none">0</span></button>
                         <button id="trash-tab-users" class="trash-tab" onclick="selectTrashTab('users')">Users <span id="badge-users" class="tab-badge" style="display:none">0</span></button>
+                        <button id="trash-tab-dms" class="trash-tab" onclick="selectTrashTab('dms')">DMs</button>
                     </div>
                     <div id="trash-comments-view" class="trash-panel-view active">
                         <div class="trash-category-title">💬 Deleted comments</div>
@@ -1623,6 +1714,16 @@
                     <div id="trash-users-view" class="trash-panel-view">
                         <div class="trash-category-title">🧑‍💻 User tags</div>
                         <div id="trash-users-list" class="trash-list"></div>
+                    </div>
+                    <div id="trash-dms-view" class="trash-panel-view">
+                        <div class="trash-category-title">💌 Private whispers inbox</div>
+                        <div id="dm-inbox-shell" class="dm-inbox-shell">
+                            <div id="dm-inbox-list" class="dm-inbox-list"></div>
+                            <div class="dm-chat-panel">
+                                <div id="dm-chat-header" class="dm-chat-header"></div>
+                                <div id="dm-chat-body" class="dm-chat-body"></div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1732,6 +1833,8 @@
         let moderationState = { bannedUsers: {}, commentCounts: {} };
         let editingPostKey = null;
         let editingPostDraft = "";
+        let dmInboxConversations = [];
+        let selectedDmKey = null;
 
         function normalizePostsPayload(data) {
             if (!data || typeof data !== 'object') {
@@ -2544,6 +2647,7 @@
                 attachTrashListeners();
                 attachLiveListeners();
                 loadAdminTrashData();
+                loadAdminDmInbox();
                 loadLiveData();
                 renderStream();
             } else {
@@ -2561,6 +2665,7 @@
             if (open) {
                 selectTrashTab('comments');
                 loadAdminTrashData();
+                loadAdminDmInbox();
                 startTrashAutoRefresh();
             } else {
                 stopTrashAutoRefresh();
@@ -2693,7 +2798,7 @@
         }
 
         function selectTrashTab(tab) {
-            const tabs = ['comments', 'likes', 'users'];
+            const tabs = ['comments', 'likes', 'users', 'dms'];
             tabs.forEach(name => {
                 const tabButton = document.getElementById('trash-tab-' + name);
                 const view = document.getElementById('trash-' + name + '-view');
@@ -2719,6 +2824,83 @@
 
         function formatTimestamp(value) {
             return new Date(value).toLocaleString();
+        }
+
+        function renderDmInbox(conversations) {
+            const list = document.getElementById('dm-inbox-list');
+            const header = document.getElementById('dm-chat-header');
+            const body = document.getElementById('dm-chat-body');
+            if (!list || !header || !body) return;
+
+            if (!conversations || conversations.length === 0) {
+                list.innerHTML = '<div class="trash-item">No private whispers yet.</div>';
+                header.innerHTML = '<div class="dm-chat-empty">Select a conversation to read it.</div>';
+                body.innerHTML = '<div class="dm-chat-empty">Your inbox will appear here.</div>';
+                return;
+            }
+
+            list.innerHTML = conversations.map(entry => {
+                const previewText = (entry.lastMessageText || 'shared a memory').replace(/\s+/g, ' ').trim();
+                const isActive = entry.key === selectedDmKey;
+                return `
+                    <button type="button" class="dm-conversation-item ${isActive ? 'active' : ''}" onclick="openDmConversation('${entry.key}')">
+                        <div class="dm-conversation-name">${escapeHtml(entry.displayName || entry.key)}</div>
+                        <div class="dm-conversation-preview">${escapeHtml(previewText)}</div>
+                        <div class="dm-conversation-meta">${escapeHtml(entry.lastMessageTime || '')}</div>
+                    </button>
+                `;
+            }).join('');
+
+            if (!selectedDmKey && conversations.length > 0) {
+                selectedDmKey = conversations[0].key;
+            }
+
+            const activeConversation = conversations.find(item => item.key === selectedDmKey) || conversations[0];
+            if (!activeConversation) return;
+            header.innerHTML = `
+                <div class="dm-conversation-name">${escapeHtml(activeConversation.displayName || activeConversation.key)}</div>
+                <div class="dm-conversation-preview">${escapeHtml(activeConversation.lastMessageTime || '')}</div>
+            `;
+            body.innerHTML = (activeConversation.messages || []).map(message => `
+                <div class="dm-chat-bubble ${message.from === 'user' ? 'mine' : ''}">
+                    ${message.text ? `<div>${escapeHtml(message.text)}</div>` : ''}
+                    ${message.mediaType === 'image' && message.mediaUrl ? `<img class="dm-media" src="${message.mediaUrl}" alt="shared memory">` : ''}
+                    ${message.mediaType === 'audio' && message.mediaUrl ? `<audio class="dm-audio" controls src="${message.mediaUrl}"></audio>` : ''}
+                    <small>${escapeHtml(message.timestampText || '')}</small>
+                </div>
+            `).join('');
+            if (!activeConversation.messages || activeConversation.messages.length === 0) {
+                body.innerHTML = '<div class="dm-chat-empty">No messages in this whisper thread yet.</div>';
+            }
+        }
+
+        function openDmConversation(key) {
+            selectedDmKey = key;
+            renderDmInbox(dmInboxConversations);
+        }
+
+        function loadAdminDmInbox() {
+            database.ref('direct_messages').once('value', (snapshot) => {
+                const data = snapshot.val() || {};
+                const conversations = Object.keys(data).map(key => {
+                    const messages = Object.values(data[key] || {}).filter(Boolean);
+                    const sortedMessages = messages.slice().sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+                    const lastMessage = sortedMessages[sortedMessages.length - 1] || null;
+                    return {
+                        key,
+                        displayName: (lastMessage && lastMessage.userTag) ? lastMessage.userTag : key,
+                        messages: sortedMessages.map(message => ({
+                            ...message,
+                            timestampText: message.timestamp ? new Date(message.timestamp).toLocaleString() : ''
+                        })),
+                        lastMessageText: lastMessage ? (lastMessage.text || (lastMessage.mediaType === 'image' ? '[photo]' : lastMessage.mediaType === 'audio' ? '[voicemail]' : '')) : 'No messages yet',
+                        lastMessageTime: lastMessage && lastMessage.timestamp ? new Date(lastMessage.timestamp).toLocaleString() : ''
+                    };
+                }).sort((a, b) => (b.messages[b.messages.length - 1]?.timestamp || 0) - (a.messages[a.messages.length - 1]?.timestamp || 0));
+
+                dmInboxConversations = conversations;
+                renderDmInbox(conversations);
+            });
         }
 
         function loadAdminTrashData() {
