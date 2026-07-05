@@ -758,7 +758,7 @@
         .admin-dm-toggle {
             position: fixed;
             top: 210px;
-            right: 20px;
+            left: 20px;
             z-index: 1006;
             width: 56px;
             height: 56px;
@@ -777,15 +777,15 @@
         .admin-dm-sidebar {
             position: fixed;
             top: 0;
-            right: 0;
+            left: 0;
             width: min(420px, 92vw);
             height: 100vh;
             background: linear-gradient(180deg, rgba(255,248,220,0.98), rgba(246,225,175,0.98));
             color: #3d2200;
-            border-left: 1px solid rgba(181, 123, 22, 0.24);
-            box-shadow: -16px 0 38px rgba(0,0,0,0.2);
+            border-right: 1px solid rgba(181, 123, 22, 0.24);
+            box-shadow: 16px 0 38px rgba(0,0,0,0.2);
             z-index: 1007;
-            transform: translateX(102%);
+            transform: translateX(-102%);
             transition: transform 0.24s ease;
             display: flex;
             flex-direction: column;
@@ -1976,6 +1976,15 @@
                 .replace(/'/g, '&#39;');
         }
 
+        const officialAdminName = 'The Keeper';
+
+        function getDmMessageLabel(message, isMine) {
+            if (isMine) return 'you';
+            if (message && message.from === 'admin') return `${officialAdminName} • official`;
+            const tag = String(message?.userTag || message?.user || message?.from || 'user').trim();
+            return tag || 'user';
+        }
+
         function renderDirectMessages(messages) {
             const container = document.getElementById('dm-messages');
             if (!container) return;
@@ -1992,7 +2001,7 @@
                         : '';
                 return `
                     <div class="dm-bubble ${isMine ? 'mine' : ''}">
-                        <div class="dm-bubble-meta">${isMine ? 'you' : 'the keeper'} • ${new Date(message.timestamp || Date.now()).toLocaleString()}</div>
+                        <div class="dm-bubble-meta">${getDmMessageLabel(message, isMine)} • ${new Date(message.timestamp || Date.now()).toLocaleString()}</div>
                         ${message.text ? `<div>${escapeHtml(message.text)}</div>` : ''}
                         ${mediaMarkup}
                     </div>
@@ -2945,14 +2954,19 @@
                 <div class="admin-dm-conversation-name">${escapeHtml(activeConversation.displayName || activeConversation.key)}</div>
                 <div class="admin-dm-conversation-preview">${escapeHtml(activeConversation.lastMessageTime || '')}</div>
             `;
-            body.innerHTML = (activeConversation.messages || []).map(message => `
-                <div class="admin-dm-bubble ${message.from === 'admin' ? 'outgoing' : ''}">
-                    ${message.text ? `<div>${escapeHtml(message.text)}</div>` : ''}
-                    ${message.mediaType === 'image' && message.mediaUrl ? `<img class="dm-media" src="${message.mediaUrl}" alt="shared memory">` : ''}
-                    ${message.mediaType === 'audio' && message.mediaUrl ? `<audio class="dm-audio" controls src="${message.mediaUrl}"></audio>` : ''}
-                    <small>${escapeHtml(message.timestampText || '')}</small>
-                </div>
-            `).join('');
+            body.innerHTML = (activeConversation.messages || []).map(message => {
+                const isOutgoing = message.from === 'admin';
+                const label = getDmMessageLabel(message, !isOutgoing);
+                return `
+                    <div class="admin-dm-bubble ${isOutgoing ? 'outgoing' : ''}">
+                        <div class="admin-dm-conversation-preview">${escapeHtml(label)}</div>
+                        ${message.text ? `<div>${escapeHtml(message.text)}</div>` : ''}
+                        ${message.mediaType === 'image' && message.mediaUrl ? `<img class="dm-media" src="${message.mediaUrl}" alt="shared memory">` : ''}
+                        ${message.mediaType === 'audio' && message.mediaUrl ? `<audio class="dm-audio" controls src="${message.mediaUrl}"></audio>` : ''}
+                        <small>${escapeHtml(message.timestampText || '')}</small>
+                    </div>
+                `;
+            }).join('');
             if (!activeConversation.messages || activeConversation.messages.length === 0) {
                 body.innerHTML = '<div class="admin-dm-thread-empty">No messages in this whisper thread yet.</div>';
             }
@@ -3001,9 +3015,10 @@
                     const messages = Object.values(data[key] || {}).filter(Boolean);
                     const sortedMessages = messages.slice().sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
                     const lastMessage = sortedMessages[sortedMessages.length - 1] || null;
+                    const participantMessage = sortedMessages.find(message => message.from === 'user');
                     return {
                         key,
-                        displayName: (lastMessage && lastMessage.userTag) ? lastMessage.userTag : key,
+                        displayName: (participantMessage && participantMessage.userTag) ? participantMessage.userTag : key,
                         messages: sortedMessages.map(message => ({
                             ...message,
                             timestampText: message.timestamp ? new Date(message.timestamp).toLocaleString() : ''
