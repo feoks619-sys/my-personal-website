@@ -261,12 +261,27 @@
         }
         .dm-title { font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
         .dm-subtitle { font-size: 0.8rem; color: #7a5520; margin-top: 4px; }
+        .dm-header-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .dm-refresh-btn,
         .dm-close-btn {
             border: none;
             background: transparent;
             color: #3d2200;
             font-size: 1rem;
             cursor: pointer;
+        }
+        .dm-refresh-btn {
+            font-size: 0.95rem;
+            padding: 4px 6px;
+            border-radius: 999px;
+        }
+        .dm-refresh-btn:hover,
+        .dm-close-btn:hover {
+            background: rgba(181, 123, 22, 0.12);
         }
         .dm-messages {
             flex: 1;
@@ -300,6 +315,15 @@
             color: #fff8dc;
         }
         .dm-bubble-meta { font-size: 0.72rem; opacity: 0.75; margin-bottom: 4px; }
+        .dm-edited-badge {
+            display: inline-block;
+            margin-left: 6px;
+            font-size: 0.64rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            opacity: 0.8;
+            font-weight: 700;
+        }
         .dm-edit-box {
             margin-top: 6px;
             display: flex;
@@ -809,7 +833,7 @@
             position: fixed;
             top: 0;
             left: 0;
-            width: min(420px, 92vw);
+            width: min(500px, 95vw);
             height: 100vh;
             background: linear-gradient(180deg, rgba(255,248,220,0.98), rgba(246,225,175,0.98));
             color: #3d2200;
@@ -840,8 +864,8 @@
             overflow: hidden;
         }
         .admin-dm-list {
-            width: 132px;
-            min-width: 132px;
+            width: 156px;
+            min-width: 156px;
             border-right: 1px solid rgba(181, 123, 22, 0.2);
             overflow-y: auto;
             padding: 10px 8px;
@@ -1882,7 +1906,10 @@
                 <div class="dm-title">// private whispers</div>
                 <div class="dm-subtitle">keep your conversations organized</div>
             </div>
-            <button type="button" class="dm-close-btn" onclick="toggleAdminDmSidebar()">✕</button>
+            <div class="dm-header-actions">
+                <button type="button" class="dm-refresh-btn" onclick="loadAdminDmInbox()" title="Refresh inbox">↻</button>
+                <button type="button" class="dm-close-btn" onclick="toggleAdminDmSidebar()">✕</button>
+            </div>
         </div>
         <div class="admin-dm-sidebar-body">
             <div id="admin-dm-list" class="admin-dm-list"></div>
@@ -1919,7 +1946,10 @@
                     <div class="dm-title">// private whispers</div>
                     <div class="dm-subtitle">only you and the keeper</div>
                 </div>
-                <button type="button" class="dm-close-btn" onclick="closeDirectMessages()">✕</button>
+                <div class="dm-header-actions">
+                    <button type="button" class="dm-refresh-btn" onclick="loadDirectMessages()" title="Refresh messages">↻</button>
+                    <button type="button" class="dm-close-btn" onclick="closeDirectMessages()">✕</button>
+                </div>
             </div>
             <div id="dm-messages" class="dm-messages"></div>
             <div class="dm-attachment-row">
@@ -2212,7 +2242,7 @@
                 return `
                     <div class="dm-bubble ${isMine ? 'mine' : ''}">
                         <div class="dm-bubble-header">
-                            <div class="dm-bubble-meta">${getDmMessageLabel(message, isMine)} • ${new Date(message.timestamp || Date.now()).toLocaleString()}</div>
+                            <div class="dm-bubble-meta">${getDmMessageLabel(message, isMine)} • ${new Date(message.timestamp || Date.now()).toLocaleString()}${message.edited ? '<span class="dm-edited-badge">edited</span>' : ''}</div>
                             ${actionsMarkup}
                         </div>
                         ${bodyMarkup}
@@ -3227,7 +3257,7 @@
                             ${actionsMarkup}
                         </div>
                         ${bodyMarkup}
-                        <small>${escapeHtml(message.timestampText || '')}</small>
+                        <small>${escapeHtml(message.timestampText || '')}${message.edited ? ' <span class="dm-edited-badge">edited</span>' : ''}</small>
                     </div>
                 `;
             }).join('');
