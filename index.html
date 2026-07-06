@@ -480,25 +480,28 @@
         }
 
         .dm-attach-send-btn.loading,
-        .dm-composer button.loading {
-            position: relative;
+        .dm-composer button.loading,
+        .admin-dm-reply-box button.loading,
+        #admin-dm-send-attach-btn.loading {
             opacity: 0.85;
             pointer-events: none;
         }
 
-        .dm-attach-send-btn.loading::after,
-        .dm-composer button.loading::after {
-            content: '';
-            position: absolute;
-            top: 50%;
-            right: 10px;
-            width: 12px;
-            height: 12px;
+        .dm-send-spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            margin-left: 8px;
             border: 2px solid rgba(255,255,255,0.8);
             border-top-color: #3d2200;
             border-radius: 50%;
-            transform: translateY(-50%);
             animation: dm-send-spin 0.8s linear infinite;
+            vertical-align: middle;
+            visibility: hidden;
+        }
+
+        .dm-send-spinner.visible {
+            visibility: visible;
         }
 
         @keyframes dm-send-spin {
@@ -2044,6 +2047,7 @@
                         <div id="admin-dm-record-status" class="dm-record-status"></div>
                     </div>
                     <button type="button" id="admin-dm-send-attach-btn" class="dm-attach-send-btn" onclick="sendAdminDmReply()" style="display:none;">send</button>
+                    <span id="admin-dm-send-spinner" class="dm-send-spinner" aria-hidden="true"></span>
                 </div>
                 <div class="admin-dm-reply-box">
                     <textarea id="admin-dm-reply-input" placeholder="reply to this whisper..."></textarea>
@@ -2620,6 +2624,10 @@
                     btn.disabled = false;
                 }
             });
+            const dmSpinner = document.getElementById('dm-send-spinner');
+            const adminSpinner = document.getElementById('admin-dm-send-spinner');
+            if (dmSpinner) dmSpinner.classList.toggle('visible', isLoading);
+            if (adminSpinner) adminSpinner.classList.toggle('visible', isLoading);
             if (message) {
                 const status = document.getElementById('dm-record-status');
                 const adminStatus = document.getElementById('admin-dm-record-status');
@@ -3985,13 +3993,13 @@
             const attachmentType = adminDmPendingAttachmentType === 'image' ? 'image' : 'audio';
             setDmSendLoading(true, 'Uploading…');
             try {
-                const urls = await Promise.all(attachments.map(file => uploadDmAttachmentFile(file, selectedDmKey)));
+                const urls = await Promise.all(attachments.map(file => promiseWithTimeout(uploadDmAttachmentFile(file, selectedDmKey), 15000, 'DM upload timed out')));
                 await Promise.all(urls.map(mediaUrl => sendPayload(mediaUrl, attachmentType)));
             } catch (err) {
                 console.warn('Admin DM upload failed:', err);
                 if (attachments.length > 0) {
                     try {
-                        const dataUrls = await Promise.all(attachments.map(file => readDmFileAsDataUrl(file)));
+                        const dataUrls = await Promise.all(attachments.map(file => promiseWithTimeout(readDmFileAsDataUrl(file), 10000, 'File read timed out')));
                         await Promise.all(dataUrls.map(dataUrl => sendPayload(dataUrl, attachmentType)));
                     } catch (fallbackErr) {
                         console.warn('Fallback admin DM upload failed:', fallbackErr);
