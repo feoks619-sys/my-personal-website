@@ -2845,6 +2845,22 @@
                 return;
             }
 
+            // If user hits send while a recording is still active, stop it first.
+            if (dmRecorder && dmRecorder.state === 'recording') {
+                stopDmRecording();
+            }
+
+            // If onstop never finalized, build the blob from recorded chunks before sending.
+            if (!dmRecordingBlob && dmRecordingChunks && dmRecordingChunks.length > 0) {
+                dmRecordingBlob = new Blob(dmRecordingChunks, { type: 'audio/webm' });
+                dmRecordingUrl = URL.createObjectURL(dmRecordingBlob);
+                const recordedFile = createAudioFileFromBlob(dmRecordingBlob, 'recorded-voicemail.webm');
+                dmPendingAttachments = recordedFile ? [recordedFile] : [];
+                dmPendingAttachmentType = 'audio';
+                dmPendingAttachmentNames = ['recorded-voicemail.webm'];
+                updateDmAttachmentControls();
+            }
+
             // Normalize attachments: prefer an in-memory recorded blob if present,
             // and ensure every attachment is a File for Firebase Storage.
             let attachments = dmRecordingBlob ? [createAudioFileFromBlob(dmRecordingBlob, 'recorded-voicemail.webm')] : (dmPendingAttachments || []).slice();
