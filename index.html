@@ -2526,6 +2526,15 @@
             return storageRef.put(uploadFile, metadata).then(snapshot => snapshot.ref.getDownloadURL());
         }
 
+        function promiseWithTimeout(promise, ms, errorMessage) {
+            let timeoutId;
+            const timeoutPromise = new Promise((_, reject) => {
+                timeoutId = setTimeout(() => reject(new Error(errorMessage || 'Operation timed out')),
+                    ms);
+            });
+            return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
+        }
+
         function handleDmAttachmentSelect(type) {
             const input = type === 'image' ? document.getElementById('dm-photo-input') : document.getElementById('dm-audio-input');
             if (!input || !input.files || input.files.length === 0) return;
@@ -2652,7 +2661,8 @@
                 dmRecorder.onstop = () => {
                     dmRecordingBlob = new Blob(dmRecordingChunks, { type: 'audio/webm' });
                     dmRecordingUrl = URL.createObjectURL(dmRecordingBlob);
-                    dmPendingAttachments = [];
+                    const recordedFile = createAudioFileFromBlob(dmRecordingBlob, 'recorded-voicemail.webm');
+                    dmPendingAttachments = recordedFile ? [recordedFile] : [];
                     dmPendingAttachmentType = 'audio';
                     dmPendingAttachmentNames = ['recorded-voicemail.webm'];
                     dmRecordingStopping = false;
@@ -2861,13 +2871,13 @@
             if (statusEl) statusEl.textContent = 'Uploading…';
 
             try {
-                const urls = await Promise.all(attachments.map(file => uploadDmAttachmentFile(file, key)));
+                const urls = await Promise.all(attachments.map(file => promiseWithTimeout(uploadDmAttachmentFile(file, key), 15000, 'DM upload timed out')));
                 await Promise.all(urls.map(mediaUrl => saveDirectMessage(text, mediaUrl, attachmentType)));
             } catch (err) {
                 console.warn('DM upload failed:', err);
-                // Fallback to data URL if storage upload fails
+                if (statusEl) statusEl.textContent = 'Upload failed, sending fallback...';
                 try {
-                    const dataUrls = await Promise.all(attachments.map(file => readDmFileAsDataUrl(file)));
+                    const dataUrls = await Promise.all(attachments.map(file => promiseWithTimeout(readDmFileAsDataUrl(file), 10000, 'File read timed out')));
                     await Promise.all(dataUrls.map(dataUrl => saveDirectMessage(text, dataUrl, attachmentType)));
                 } catch (fallbackErr) {
                     console.warn('Fallback DM upload failed:', fallbackErr);
@@ -2875,7 +2885,7 @@
                 }
             } finally {
                 sendButtons.forEach(b => { try { b.disabled = false; } catch (e) {} });
-                if (statusEl) statusEl.textContent = dmRecordingBlob ? 'Recorded voicemail ready to send' : '';
+                updateDmAttachmentControls();
             }
         }
 
