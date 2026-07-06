@@ -479,6 +479,33 @@
             cursor: pointer;
         }
 
+        .dm-attach-send-btn.loading,
+        .dm-composer button.loading {
+            position: relative;
+            opacity: 0.85;
+            pointer-events: none;
+        }
+
+        .dm-attach-send-btn.loading::after,
+        .dm-composer button.loading::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            right: 10px;
+            width: 12px;
+            height: 12px;
+            border: 2px solid rgba(255,255,255,0.8);
+            border-top-color: #3d2200;
+            border-radius: 50%;
+            transform: translateY(-50%);
+            animation: dm-send-spin 0.8s linear infinite;
+        }
+
+        @keyframes dm-send-spin {
+            from { transform: translateY(-50%) rotate(0deg); }
+            to { transform: translateY(-50%) rotate(360deg); }
+        }
+
         @media (max-width: 768px) {
             #typed-text {
                 font-size: 1rem;
@@ -2582,6 +2609,23 @@
             }
         }
 
+        function setDmSendLoading(isLoading, message) {
+            const sendButtons = Array.from(document.querySelectorAll('.dm-composer button, #dm-send-attach-btn'));
+            sendButtons.forEach(btn => {
+                if (isLoading) {
+                    btn.classList.add('loading');
+                    btn.disabled = true;
+                } else {
+                    btn.classList.remove('loading');
+                    btn.disabled = false;
+                }
+            });
+            if (message) {
+                const status = document.getElementById('dm-record-status');
+                if (status) status.textContent = message;
+            }
+        }
+
         function updateAdminDmAttachmentControls() {
             const label = document.getElementById('admin-dm-attachment-name');
             const status = document.getElementById('admin-dm-record-status');
@@ -2905,10 +2949,8 @@
             if (dmRecordingBlob && !dmPendingAttachmentType) dmPendingAttachmentType = 'audio';
             const attachmentType = dmPendingAttachmentType === 'image' ? 'image' : 'audio';
 
-            const sendButtons = Array.from(document.querySelectorAll('.dm-composer button, #dm-send-attach-btn'));
-            sendButtons.forEach(b => { try { b.disabled = true; } catch (e) {} });
             const statusEl = document.getElementById('dm-record-status');
-            if (statusEl) statusEl.textContent = 'Uploading…';
+            setDmSendLoading(true, 'Uploading…');
 
             try {
                 const urls = await Promise.all(attachments.map(file => promiseWithTimeout(uploadDmAttachmentFile(file, key), 15000, 'DM upload timed out')));
@@ -2924,7 +2966,7 @@
                     alert('Your attachment could not be sent right now.');
                 }
             } finally {
-                sendButtons.forEach(b => { try { b.disabled = false; } catch (e) {} });
+                setDmSendLoading(false);
                 updateDmAttachmentControls();
             }
         }
