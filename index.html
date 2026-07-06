@@ -2824,6 +2824,11 @@
         }
 
         async function sendDmMessage() {
+            // If recording is actively happening, stop it and wait for finalization.
+            if (dmRecorder && dmRecorder.state === 'recording') {
+                stopDmRecording();
+            }
+
             // If recording is still finalizing, wait briefly for onstop to complete.
             if (dmRecordingStopping) {
                 const start = Date.now();
@@ -2848,6 +2853,11 @@
             // If user hits send while a recording is still active, stop it first.
             if (dmRecorder && dmRecorder.state === 'recording') {
                 stopDmRecording();
+                const start = Date.now();
+                while (dmRecordingStopping && Date.now() - start < 6000) {
+                    // eslint-disable-next-line no-await-in-loop
+                    await new Promise(r => setTimeout(r, 200));
+                }
             }
 
             // If onstop never finalized, build the blob from recorded chunks before sending.
