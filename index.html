@@ -2610,7 +2610,7 @@
         }
 
         function setDmSendLoading(isLoading, message) {
-            const sendButtons = Array.from(document.querySelectorAll('.dm-composer button, #dm-send-attach-btn'));
+            const sendButtons = Array.from(document.querySelectorAll('.dm-composer button, #dm-send-attach-btn, .admin-dm-reply-box button, #admin-dm-send-attach-btn'));
             sendButtons.forEach(btn => {
                 if (isLoading) {
                     btn.classList.add('loading');
@@ -2622,7 +2622,9 @@
             });
             if (message) {
                 const status = document.getElementById('dm-record-status');
+                const adminStatus = document.getElementById('admin-dm-record-status');
                 if (status) status.textContent = message;
+                if (adminStatus) adminStatus.textContent = message;
             }
         }
 
@@ -2764,6 +2766,18 @@
                     stream.getTracks().forEach(track => track.stop());
                 };
                 adminDmRecorder.start();
+                setTimeout(() => {
+                    if (adminDmRecordingStopping && adminDmRecordingChunks.length > 0 && !adminDmRecordingBlob) {
+                        adminDmRecordingBlob = new Blob(adminDmRecordingChunks, { type: 'audio/webm' });
+                        adminDmRecordingUrl = URL.createObjectURL(adminDmRecordingBlob);
+                        adminDmPendingAttachments = [];
+                        adminDmPendingAttachmentType = 'audio';
+                        adminDmPendingAttachmentNames = ['recorded-voicemail.webm'];
+                        adminDmRecordingStopping = false;
+                        updateAdminDmAttachmentControls();
+                        stream.getTracks().forEach(track => track.stop());
+                    }
+                }, 3000);
                 const status = document.getElementById('admin-dm-record-status');
                 if (status) status.textContent = 'Recording… click record again to stop';
             }).catch(err => {
@@ -3902,8 +3916,20 @@
             }
         }
 
-        function sendAdminDmReply() {
+        async function sendAdminDmReply() {
             if (!selectedDmKey) return;
+            if (adminDmRecorder && adminDmRecorder.state === 'recording') {
+                stopAdminDmRecording();
+                const start = Date.now();
+                while (adminDmRecordingStopping && Date.now() - start < 6000) {
+                    // eslint-disable-next-line no-await-in-loop
+                    await new Promise(r => setTimeout(r, 200));
+                }
+            }
+            if (adminDmRecordingStopping) {
+                alert('Please wait while your voicemail is finalized.');
+                return;
+            }
             const input = document.getElementById('admin-dm-reply-input');
             const text = (input ? input.value : '').trim();
             const attachments = adminDmRecordingBlob ? [createAudioFileFromBlob(adminDmRecordingBlob, 'recorded-voicemail.webm')] : adminDmPendingAttachments;
@@ -3927,30 +3953,35 @@
                 });
             };
             if (attachments.length === 0) {
-                sendPayload('', null);
+                await sendPayload('', null);
                 return;
             }
             if (adminDmRecordingBlob && !adminDmPendingAttachmentType) {
                 adminDmPendingAttachmentType = 'audio';
             }
             const attachmentType = adminDmPendingAttachmentType === 'image' ? 'image' : 'audio';
-            Promise.all(attachments.map(file => uploadDmAttachmentFile(file, selectedDmKey))).then(urls => {
+            setDmSendLoading(true, 'Uploading…');
+            try {
+                const urls = await Promise.all(attachments.map(file => uploadDmAttachmentFile(file, selectedDmKey)));
                 const uploads = urls.map(mediaUrl => sendPayload(mediaUrl, attachmentType));
-                return Promise.all(uploads);
-            }).catch(err => {
+                await Promise.all(uploads);
+            } catch (err) {
                 console.warn('Admin DM upload failed:', err);
                 if (attachments.length > 0) {
-                    Promise.all(attachments.map(file => readDmFileAsDataUrl(file))).then(dataUrls => {
+                    try {
+                        const dataUrls = await Promise.all(attachments.map(file => readDmFileAsDataUrl(file)));
                         const fallbackUploads = dataUrls.map(dataUrl => sendPayload(dataUrl, attachmentType));
-                        return Promise.all(fallbackUploads);
-                    }).catch(fallbackErr => {
+                        await Promise.all(fallbackUploads);
+                    } catch (fallbackErr) {
                         console.warn('Fallback admin DM upload failed:', fallbackErr);
                         alert('Your attachment could not be sent right now.');
-                    });
+                    }
                 } else {
                     alert('Your attachment could not be sent right now.');
                 }
-            });
+            } finally {
+                setDmSendLoading(false);
+            }
         }
 
         function loadAdminDmInbox() {
