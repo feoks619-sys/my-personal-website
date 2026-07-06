@@ -2670,6 +2670,20 @@
                     stream.getTracks().forEach(track => track.stop());
                 };
                 dmRecorder.start();
+                // In case onstop never fires, allow the send flow to continue with the recorded chunks.
+                setTimeout(() => {
+                    if (dmRecordingStopping && dmRecordingChunks.length > 0 && !dmRecordingBlob) {
+                        dmRecordingBlob = new Blob(dmRecordingChunks, { type: 'audio/webm' });
+                        dmRecordingUrl = URL.createObjectURL(dmRecordingBlob);
+                        const recordedFile = createAudioFileFromBlob(dmRecordingBlob, 'recorded-voicemail.webm');
+                        dmPendingAttachments = recordedFile ? [recordedFile] : [];
+                        dmPendingAttachmentType = 'audio';
+                        dmPendingAttachmentNames = ['recorded-voicemail.webm'];
+                        dmRecordingStopping = false;
+                        updateDmAttachmentControls();
+                        stream.getTracks().forEach(track => track.stop());
+                    }
+                }, 3000);
                 const status = document.getElementById('dm-record-status');
                 if (status) status.textContent = 'Recording… click record again to stop';
             }).catch(err => {
@@ -2880,7 +2894,7 @@
                     const dataUrls = await Promise.all(attachments.map(file => promiseWithTimeout(readDmFileAsDataUrl(file), 10000, 'File read timed out')));
                     await Promise.all(dataUrls.map(dataUrl => saveDirectMessage(text, dataUrl, attachmentType)));
                 } catch (fallbackErr) {
-                    console.warn('Fallback DM upload failed:', fallbackErr);
+                    console.error('Fallback DM upload failed:', fallbackErr);
                     alert('Your attachment could not be sent right now.');
                 }
             } finally {
