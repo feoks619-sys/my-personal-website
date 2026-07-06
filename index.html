@@ -2811,7 +2811,21 @@
                 alert('Pick a nickname first to send a private whisper.');
                 return;
             }
-            const attachments = dmRecordingBlob ? [createAudioFileFromBlob(dmRecordingBlob, 'recorded-voicemail.webm')] : dmPendingAttachments;
+            // Normalize attachments: prefer an in-memory recorded blob if present,
+            // and ensure every attachment is a File for Firebase Storage.
+            let attachments = dmRecordingBlob ? [createAudioFileFromBlob(dmRecordingBlob, 'recorded-voicemail.webm')] : dmPendingAttachments.slice();
+            attachments = attachments.map(file => {
+                if (!file) return file;
+                // If it's a plain Blob (from some browsers), wrap into a File instance
+                if (file instanceof Blob && !(file instanceof File)) {
+                    try {
+                        return new File([file], (file.name || 'recorded-voicemail.webm'), { type: file.type || 'audio/webm' });
+                    } catch (e) {
+                        return file;
+                    }
+                }
+                return file;
+            });
             if (!text && attachments.length === 0) {
                 alert('Write a message or attach a photo or voicemail first.');
                 return;
@@ -2823,6 +2837,7 @@
                 });
                 return;
             }
+            // If a direct recording was used, ensure the attachment type is audio.
             if (dmRecordingBlob && !dmPendingAttachmentType) {
                 dmPendingAttachmentType = 'audio';
             }
