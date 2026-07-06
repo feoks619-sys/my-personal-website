@@ -3917,7 +3917,10 @@
         }
 
         async function sendAdminDmReply() {
-            if (!selectedDmKey) return;
+            if (!selectedDmKey) {
+                alert('Select a conversation first before sending an admin reply.');
+                return;
+            }
             if (adminDmRecorder && adminDmRecorder.state === 'recording') {
                 stopAdminDmRecording();
                 const start = Date.now();
@@ -3932,7 +3935,27 @@
             }
             const input = document.getElementById('admin-dm-reply-input');
             const text = (input ? input.value : '').trim();
-            const attachments = adminDmRecordingBlob ? [createAudioFileFromBlob(adminDmRecordingBlob, 'recorded-voicemail.webm')] : adminDmPendingAttachments;
+            if (!adminDmRecordingBlob && adminDmRecordingChunks && adminDmRecordingChunks.length > 0) {
+                adminDmRecordingBlob = new Blob(adminDmRecordingChunks, { type: 'audio/webm' });
+                adminDmRecordingUrl = URL.createObjectURL(adminDmRecordingBlob);
+                const recordedFile = createAudioFileFromBlob(adminDmRecordingBlob, 'recorded-voicemail.webm');
+                adminDmPendingAttachments = recordedFile ? [recordedFile] : [];
+                adminDmPendingAttachmentType = 'audio';
+                adminDmPendingAttachmentNames = ['recorded-voicemail.webm'];
+                updateAdminDmAttachmentControls();
+            }
+            let attachments = adminDmRecordingBlob ? [createAudioFileFromBlob(adminDmRecordingBlob, 'recorded-voicemail.webm')] : (adminDmPendingAttachments || []).slice();
+            attachments = attachments.map(file => {
+                if (!file) return file;
+                if (file instanceof Blob && !(file instanceof File)) {
+                    try {
+                        return new File([file], (file.name || 'recorded-voicemail.webm'), { type: file.type || 'audio/webm' });
+                    } catch (e) {
+                        return file;
+                    }
+                }
+                return file;
+            }).filter(Boolean);
             if (!text && attachments.length === 0) {
                 alert('Write a reply or attach a photo or voicemail first.');
                 return;
@@ -3963,15 +3986,13 @@
             setDmSendLoading(true, 'Uploading…');
             try {
                 const urls = await Promise.all(attachments.map(file => uploadDmAttachmentFile(file, selectedDmKey)));
-                const uploads = urls.map(mediaUrl => sendPayload(mediaUrl, attachmentType));
-                await Promise.all(uploads);
+                await Promise.all(urls.map(mediaUrl => sendPayload(mediaUrl, attachmentType)));
             } catch (err) {
                 console.warn('Admin DM upload failed:', err);
                 if (attachments.length > 0) {
                     try {
                         const dataUrls = await Promise.all(attachments.map(file => readDmFileAsDataUrl(file)));
-                        const fallbackUploads = dataUrls.map(dataUrl => sendPayload(dataUrl, attachmentType));
-                        await Promise.all(fallbackUploads);
+                        await Promise.all(dataUrls.map(dataUrl => sendPayload(dataUrl, attachmentType)));
                     } catch (fallbackErr) {
                         console.warn('Fallback admin DM upload failed:', fallbackErr);
                         alert('Your attachment could not be sent right now.');
