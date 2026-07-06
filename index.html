@@ -2799,11 +2799,20 @@
             });
         }
 
-        function sendDmMessage() {
+        async function sendDmMessage() {
+            // If recording is still finalizing, wait briefly for onstop to complete.
             if (dmRecordingStopping) {
-                alert('Please wait while your voicemail is finalized.');
-                return;
+                const start = Date.now();
+                while (dmRecordingStopping && Date.now() - start < 6000) {
+                    // eslint-disable-next-line no-await-in-loop
+                    await new Promise(r => setTimeout(r, 200));
+                }
+                if (dmRecordingStopping) {
+                    alert('Please wait while your voicemail is finalized.');
+                    return;
+                }
             }
+
             const input = document.getElementById('dm-input');
             const text = (input ? input.value : '').trim();
             const key = (claimedSoulTag || localStorage.getItem('archive_soul_tag') || '').trim().toLowerCase();
@@ -2811,12 +2820,12 @@
                 alert('Pick a nickname first to send a private whisper.');
                 return;
             }
+
             // Normalize attachments: prefer an in-memory recorded blob if present,
             // and ensure every attachment is a File for Firebase Storage.
-            let attachments = dmRecordingBlob ? [createAudioFileFromBlob(dmRecordingBlob, 'recorded-voicemail.webm')] : dmPendingAttachments.slice();
+            let attachments = dmRecordingBlob ? [createAudioFileFromBlob(dmRecordingBlob, 'recorded-voicemail.webm')] : (dmPendingAttachments || []).slice();
             attachments = attachments.map(file => {
                 if (!file) return file;
-                // If it's a plain Blob (from some browsers), wrap into a File instance
                 if (file instanceof Blob && !(file instanceof File)) {
                     try {
                         return new File([file], (file.name || 'recorded-voicemail.webm'), { type: file.type || 'audio/webm' });
@@ -2825,40 +2834,49 @@
                     }
                 }
                 return file;
-            });
+            }).filter(Boolean);
+
             if (!text && attachments.length === 0) {
                 alert('Write a message or attach a photo or voicemail first.');
                 return;
             }
+
             if (attachments.length === 0) {
-                saveDirectMessage(text, '', null).catch(err => {
+                try {
+                    await saveDirectMessage(text, '', null);
+                } catch (err) {
                     console.warn('DM send failed:', err);
                     alert('Your message could not be sent right now.');
-                });
+                }
                 return;
             }
-            // If a direct recording was used, ensure the attachment type is audio.
-            if (dmRecordingBlob && !dmPendingAttachmentType) {
-                dmPendingAttachmentType = 'audio';
-            }
+
+            // Ensure attachment type is set for recorded blobs
+            if (dmRecordingBlob && !dmPendingAttachmentType) dmPendingAttachmentType = 'audio';
             const attachmentType = dmPendingAttachmentType === 'image' ? 'image' : 'audio';
-            Promise.all(attachments.map(file => uploadDmAttachmentFile(file, key))).then(urls => {
-                const uploads = urls.map(mediaUrl => saveDirectMessage(text, mediaUrl, attachmentType));
-                return Promise.all(uploads);
-            }).catch(err => {
+
+            const sendButtons = Array.from(document.querySelectorAll('.dm-composer button, #dm-send-attach-btn'));
+            sendButtons.forEach(b => { try { b.disabled = true; } catch (e) {} });
+            const statusEl = document.getElementById('dm-record-status');
+            if (statusEl) statusEl.textContent = 'Uploading…';
+
+            try {
+                const urls = await Promise.all(attachments.map(file => uploadDmAttachmentFile(file, key)));
+                await Promise.all(urls.map(mediaUrl => saveDirectMessage(text, mediaUrl, attachmentType)));
+            } catch (err) {
                 console.warn('DM upload failed:', err);
-                if (attachments.length > 0) {
-                    Promise.all(attachments.map(file => readDmFileAsDataUrl(file))).then(dataUrls => {
-                        const fallbackUploads = dataUrls.map(dataUrl => saveDirectMessage(text, dataUrl, attachmentType));
-                        return Promise.all(fallbackUploads);
-                    }).catch(fallbackErr => {
-                        console.warn('Fallback DM upload failed:', fallbackErr);
-                        alert('Your attachment could not be sent right now.');
-                    });
-                } else {
+                // Fallback to data URL if storage upload fails
+                try {
+                    const dataUrls = await Promise.all(attachments.map(file => readDmFileAsDataUrl(file)));
+                    await Promise.all(dataUrls.map(dataUrl => saveDirectMessage(text, dataUrl, attachmentType)));
+                } catch (fallbackErr) {
+                    console.warn('Fallback DM upload failed:', fallbackErr);
                     alert('Your attachment could not be sent right now.');
                 }
-            });
+            } finally {
+                sendButtons.forEach(b => { try { b.disabled = false; } catch (e) {} });
+                if (statusEl) statusEl.textContent = dmRecordingBlob ? 'Recorded voicemail ready to send' : '';
+            }
         }
 
         window.onload = function() {
