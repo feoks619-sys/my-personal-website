@@ -2137,6 +2137,7 @@
         let dmRecordingBlob = null;
         let dmRecordingUrl = null;
         let dmRecordingStopping = false;
+        let dmRecordingFinalizeTimer = null;
         let dmMessagesRef = null;
         let dmMessagesListener = null;
         let currentView = "live"; 
@@ -2161,6 +2162,7 @@
         let adminDmRecordingBlob = null;
         let adminDmRecordingUrl = null;
         let adminDmRecordingStopping = false;
+        let adminDmRecordingFinalizeTimer = null;
 
         function normalizePostsPayload(data) {
             if (!data || typeof data !== 'object') {
@@ -2712,7 +2714,9 @@
                 dmRecorder.ondataavailable = event => {
                     if (event.data && event.data.size > 0) dmRecordingChunks.push(event.data);
                 };
+                const activeDmRecorder = dmRecorder;
                 dmRecorder.onstop = () => {
+                    if (dmRecorder !== activeDmRecorder) return;
                     dmRecordingBlob = new Blob(dmRecordingChunks, { type: 'audio/webm' });
                     dmRecordingUrl = URL.createObjectURL(dmRecordingBlob);
                     const recordedFile = createAudioFileFromBlob(dmRecordingBlob, 'recorded-voicemail.webm');
@@ -2725,7 +2729,9 @@
                 };
                 dmRecorder.start();
                 // In case onstop never fires, allow the send flow to continue with the recorded chunks.
-                setTimeout(() => {
+                clearDmRecordingFinalizeTimer();
+                dmRecordingFinalizeTimer = window.setTimeout(() => {
+                    dmRecordingFinalizeTimer = null;
                     if (dmRecordingStopping && dmRecordingChunks.length > 0 && !dmRecordingBlob) {
                         dmRecordingBlob = new Blob(dmRecordingChunks, { type: 'audio/webm' });
                         dmRecordingUrl = URL.createObjectURL(dmRecordingBlob);
@@ -2763,7 +2769,9 @@
                 adminDmRecorder.ondataavailable = event => {
                     if (event.data && event.data.size > 0) adminDmRecordingChunks.push(event.data);
                 };
+                const activeAdminDmRecorder = adminDmRecorder;
                 adminDmRecorder.onstop = () => {
+                    if (adminDmRecorder !== activeAdminDmRecorder) return;
                     adminDmRecordingBlob = new Blob(adminDmRecordingChunks, { type: 'audio/webm' });
                     adminDmRecordingUrl = URL.createObjectURL(adminDmRecordingBlob);
                     adminDmPendingAttachments = [];
@@ -2774,7 +2782,9 @@
                     stream.getTracks().forEach(track => track.stop());
                 };
                 adminDmRecorder.start();
-                setTimeout(() => {
+                clearAdminDmRecordingFinalizeTimer();
+                adminDmRecordingFinalizeTimer = window.setTimeout(() => {
+                    adminDmRecordingFinalizeTimer = null;
                     if (adminDmRecordingStopping && adminDmRecordingChunks.length > 0 && !adminDmRecordingBlob) {
                         adminDmRecordingBlob = new Blob(adminDmRecordingChunks, { type: 'audio/webm' });
                         adminDmRecordingUrl = URL.createObjectURL(adminDmRecordingBlob);
@@ -2795,6 +2805,7 @@
         }
 
         function stopDmRecording() {
+            clearDmRecordingFinalizeTimer();
             if (dmRecorder && dmRecorder.state === 'recording') {
                 dmRecorder.stop();
                 dmRecordingStopping = true;
@@ -2814,6 +2825,7 @@
         }
 
         function stopAdminDmRecording() {
+            clearAdminDmRecordingFinalizeTimer();
             if (adminDmRecorder && adminDmRecorder.state === 'recording') {
                 adminDmRecorder.stop();
                 adminDmRecordingStopping = true;
@@ -2832,12 +2844,30 @@
             updateAdminDmAttachmentControls();
         }
 
+        function clearDmRecordingFinalizeTimer() {
+            if (dmRecordingFinalizeTimer) {
+                clearTimeout(dmRecordingFinalizeTimer);
+                dmRecordingFinalizeTimer = null;
+            }
+        }
+
+        function clearAdminDmRecordingFinalizeTimer() {
+            if (adminDmRecordingFinalizeTimer) {
+                clearTimeout(adminDmRecordingFinalizeTimer);
+                adminDmRecordingFinalizeTimer = null;
+            }
+        }
+
         function clearDmAttachment() {
             dmPendingAttachments = [];
             dmPendingAttachmentType = null;
             dmPendingAttachmentNames = [];
+            dmRecordingChunks = [];
             dmRecordingBlob = null;
             dmRecordingUrl = null;
+            dmRecordingStopping = false;
+            dmRecorder = null;
+            clearDmRecordingFinalizeTimer();
             stopDmRecording();
             const label = document.getElementById('dm-attachment-name');
             if (label) label.textContent = 'No attachment';
@@ -2855,8 +2885,12 @@
             adminDmPendingAttachments = [];
             adminDmPendingAttachmentType = null;
             adminDmPendingAttachmentNames = [];
+            adminDmRecordingChunks = [];
             adminDmRecordingBlob = null;
             adminDmRecordingUrl = null;
+            adminDmRecordingStopping = false;
+            adminDmRecorder = null;
+            clearAdminDmRecordingFinalizeTimer();
             stopAdminDmRecording();
             const label = document.getElementById('admin-dm-attachment-name');
             if (label) label.textContent = 'No attachment';
@@ -2916,6 +2950,13 @@
                 return;
             }
 
+            clearDmRecordingFinalizeTimer();
+            if (!dmRecordingBlob && dmRecordingChunks.length === 0) {
+                dmPendingAttachments = [];
+                dmPendingAttachmentType = null;
+                dmPendingAttachmentNames = [];
+            }
+
             // If user hits send while a recording is still active, stop it first.
             if (dmRecorder && dmRecorder.state === 'recording') {
                 stopDmRecording();
@@ -2960,6 +3001,7 @@
             if (attachments.length === 0) {
                 try {
                     await saveDirectMessage(text, '', null);
+                    clearDmAttachment();
                 } catch (err) {
                     console.warn('DM send failed:', err);
                     alert('Your message could not be sent right now.');
@@ -2977,6 +3019,7 @@
             try {
                 const urls = await Promise.all(attachments.map(file => promiseWithTimeout(uploadDmAttachmentFile(file, key), 15000, 'DM upload timed out')));
                 await Promise.all(urls.map(mediaUrl => saveDirectMessage(text, mediaUrl, attachmentType)));
+                clearDmAttachment();
             } catch (err) {
                 console.warn('DM upload failed:', err);
                 if (statusEl) statusEl.textContent = 'Upload failed, sending fallback...';
@@ -3943,6 +3986,12 @@
             }
             const input = document.getElementById('admin-dm-reply-input');
             const text = (input ? input.value : '').trim();
+            clearAdminDmRecordingFinalizeTimer();
+            if (!adminDmRecordingBlob && adminDmRecordingChunks && adminDmRecordingChunks.length === 0) {
+                adminDmPendingAttachments = [];
+                adminDmPendingAttachmentType = null;
+                adminDmPendingAttachmentNames = [];
+            }
             if (!adminDmRecordingBlob && adminDmRecordingChunks && adminDmRecordingChunks.length > 0) {
                 adminDmRecordingBlob = new Blob(adminDmRecordingChunks, { type: 'audio/webm' });
                 adminDmRecordingUrl = URL.createObjectURL(adminDmRecordingBlob);
