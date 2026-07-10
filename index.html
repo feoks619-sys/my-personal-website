@@ -3474,6 +3474,7 @@
             claimedSoulTag = normalizedTag;
             syncDirectMessageButton();
             loadDirectMessages();
+            renderStream();
             const portal = document.getElementById('identity-portal');
             if (portal) {
                 portal.classList.remove('show');
