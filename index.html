@@ -2270,10 +2270,19 @@
                         applyPostsPayload(data, 'rest');
                         console.log('REST fallback loaded posts:', globalPostsCache.length);
                     } else {
-                        globalPostsCache = [];
-                        setPostsLoadState('empty', 'No fragments are available right now.', null);
-                        renderStream();
-                        console.log('REST fallback: no posts data returned');
+                        const cached = getCachedPosts();
+                        if (cached.length > 0) {
+                            globalPostsCache = cached;
+                            globalPostsCache.sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
+                            setPostsLoadState('ready', 'Showing cached archive data.', null);
+                            renderStream();
+                            console.log('REST fallback: no posts data returned, using cache');
+                        } else {
+                            globalPostsCache = [];
+                            setPostsLoadState('empty', 'No fragments are available right now.', null);
+                            renderStream();
+                            console.log('REST fallback: no posts data returned');
+                        }
                     }
                 })
                 .catch(async err => {
@@ -3730,6 +3739,9 @@
                     globalPostsCache = cachedPosts;
                     globalPostsCache.sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
                     setPostsLoadState('ready', '', null);
+                    renderStream();
+                    console.log('showFeed: displaying cached posts while fetching fresh data in background');
+                    fetchPostsViaRest();
                 } else {
                     setPostsLoadState('loading', 'Loading fragments...');
                     console.log('showFeed: no realtime data yet, fetching posts via REST fallback');
@@ -5339,27 +5351,32 @@
             stream.innerHTML = ""; 
 
             const postsToRender = Array.isArray(globalPostsCache) ? globalPostsCache : [];
-            const targetArray = postsToRender.filter(post => {
-                const postVisibility = post.visibility || "live";
+            const targetArray = postsToRender.filter(rawPost => {
+                const post = rawPost || {};
+                const postVisibility = String(post.visibility || "live");
                 return currentView === "live" ? postVisibility === "live" : postVisibility === "closet";
             });
 
             if(targetArray.length === 0) {
-                const message = postsLoadStatus === 'error'
+                const statusMessage = postsLoadStatus === 'error'
                     ? postsLoadMessage
                     : postsLoadStatus === 'loading'
                         ? postsLoadMessage
                         : postsLoadMessage || '// this space is completely empty.';
-                stream.innerHTML = `<div style="text-align:center; padding:40px; color:#a39683;">${message}</div>`;
+                const fallbackLabel = (!listenerSeenData && getCachedPosts().length > 0) ? '<div style="font-size: 0.8rem; color: #d4b483; margin-bottom: 10px;">Using cached archive data because live feed is unavailable.</div>' : '';
+                stream.innerHTML = `<div style="text-align:center; padding:40px; color:#a39683;">${fallbackLabel}${statusMessage}</div>`;
                 return;
             }
 
             targetArray.forEach(post => {
                 const card = document.createElement('div');
                 card.classList.add('post-card');
+                const safePost = post || {};
 
                 let mediaHTML = "";
-                if (post.media) {
+                const mediaValue = String(safePost.media || '');
+                const mediaTypeValue = String(safePost.mediaType || '');
+                if (mediaValue) {
                     if (post.mediaType === "video" || post.media.includes("data:video") || post.media.endsWith('.mp4')) {
                         mediaHTML = `<video class="post-media" src="${post.media}" controls></video>`;
                     } else {
@@ -5388,7 +5405,7 @@
                     }
                 }
 
-                const registryValues = post.voterRegistry ? Object.values(post.voterRegistry) : [];
+                const registryValues = post.voterRegistry && typeof post.voterRegistry === 'object' ? Object.values(post.voterRegistry) : [];
                 const hasBeenLikedByMe = registryValues.some(entry => {
                     if (entry && typeof entry === 'object' && entry.fingerprint) {
                         return entry.fingerprint === userFingerprint;
@@ -5418,7 +5435,7 @@
                 const likedClass = effectiveLiked ? "liked" : "";
 
                 // Calculate exact whispers counts automatically
-                const whisperEntries = post.whispers ? Object.entries(post.whispers) : [];
+                const whisperEntries = post.whispers && typeof post.whispers === 'object' ? Object.entries(post.whispers) : [];
                 try {
                     const pendingComments = JSON.parse(localStorage.getItem('archive_pending_comments') || '{}');
                     const pendingForPost = pendingComments[post.fbKey];
@@ -5441,10 +5458,11 @@
                 if (whisperCount > 0) {
                     whispersHTML = `<div class="whisper-stream">`;
                     whisperEntries.forEach(([whisperKey, w]) => {
-                        const userHandle = w.user || "anonymous soul";
-                        const letterIcon = userHandle.charAt(0).toUpperCase();
+                        const safeWhisper = w || {};
+                        const userHandle = String(safeWhisper.user || "anonymous soul");
+                        const letterIcon = String(userHandle).charAt(0).toUpperCase();
                         const bubbleBg = getAvatarColor(userHandle);
-                        const replyEntries = w.replies ? Object.entries(w.replies) : [];
+                        const replyEntries = safeWhisper.replies && typeof safeWhisper.replies === 'object' ? Object.entries(safeWhisper.replies) : [];
                         try {
                             const pendingReplies = JSON.parse(localStorage.getItem('archive_pending_replies') || '{}');
                             const pendingForPost = pendingReplies[post.fbKey] || {};
@@ -5468,9 +5486,9 @@
                             <div class="single-whisper">
                                 <div class="whisper-avatar" style="background-color: ${bubbleBg};">${letterIcon}</div>
                                 <div class="whisper-details">
-                                    <span class="whisper-user">@${userHandle}</span>
-                                    <span class="whisper-text">${w.text}</span>
-                                    <div class="comment-time">${new Date(w.timestamp || Date.now()).toLocaleString()}</div>
+                                    <span class="whisper-user">@${escapeHtml(userHandle)}</span>
+                                    <span class="whisper-text">${escapeHtml(String(safeWhisper.text || ''))}</span>
+                                    <div class="comment-time">${new Date(Number(safeWhisper.timestamp) || Date.now()).toLocaleString()}</div>
                                     ${isAdminLoggedIn || canDeleteWhisper ? `
                                         <div class="whisper-admin-actions">
                                             ${canDeleteWhisper ? `<button type="button" onclick="deleteWhisper('${post.fbKey}', '${whisperKey}', event)">delete</button>` : ""}
@@ -5484,7 +5502,7 @@
                                         <div class="reply-list">
                                             ${replyEntries.map(([replyKey, reply]) => {
                                                 const isAdminReply = Boolean(reply.isAdmin || reply.user === 'admin' || reply.user === 'official');
-                                                const replyName = isAdminReply ? 'admin reply' : '@' + (reply.user || 'unknown');
+                                                const replyName = isAdminReply ? 'admin reply' : '@' + (String(reply.user || 'unknown'));
                                                 const canDelete = isAdminLoggedIn || (reply.user && String(reply.user).trim().toLowerCase() === normalizedCurrentTag);
                                                 return `
                                                     <div class="reply-bubble">
@@ -5492,7 +5510,7 @@
                                                             <span>${replyName}${isAdminReply ? '<span class="admin-badge">👑 official</span>' : ''} • ${new Date(reply.timestamp || Date.now()).toLocaleString()}</span>
                                                             ${canDelete && replyKey ? `<button type="button" class="reply-delete-btn" onclick="deleteReply('${post.fbKey}', '${whisperKey}', '${replyKey}', event)">delete</button>` : ''}
                                                         </div>
-                                                        <div>${reply.text}</div>
+                                                        <div>${escapeHtml(String(reply.text || ''))}</div>
                                                     </div>
                                                 `;
                                             }).join('')}
