@@ -3009,6 +3009,8 @@
             dmRecorder = null;
             clearDmRecordingFinalizeTimer();
             stopDmRecording();
+            const input = document.getElementById('dm-input');
+            if (input) input.value = '';
             const label = document.getElementById('dm-attachment-name');
             if (label) label.textContent = 'No attachment';
             const status = document.getElementById('dm-record-status');
@@ -3032,6 +3034,8 @@
             adminDmRecorder = null;
             clearAdminDmRecordingFinalizeTimer();
             stopAdminDmRecording();
+            const input = document.getElementById('admin-dm-reply-input');
+            if (input) input.value = '';
             const label = document.getElementById('admin-dm-attachment-name');
             if (label) label.textContent = 'No attachment';
             const status = document.getElementById('admin-dm-record-status');
@@ -4495,52 +4499,58 @@
             likesList.innerHTML = '<div class="trash-item">Loading deleted likes...</div>';
             usersList.innerHTML = '<div class="trash-item">Loading user tags...</div>';
 
-            Promise.all([
-                database.ref('trash/comments').once('value', (snapshot) => {
-                    const data = snapshot.val() || {};
-                    const items = Object.values(data).slice(-10).reverse();
-                    if (items.length === 0) {
-                        commentsList.innerHTML = '<div class="trash-item">No deleted comments yet.</div>';
-                    } else {
-                        commentsList.innerHTML = items.map(item => `<div class="trash-item"><strong>${item.user}</strong>: ${item.text}<small>post: ${item.postKey} • deleted: ${item.deletedAtText}</small></div>`).join('');
-                    }
-                }).catch(() => {
+            // Comments
+            firebaseCallWithTimeout(database.ref('trash/comments'), 3000).then(snapshot => {
+                const data = snapshot.val() || {};
+                const items = Object.values(data).slice(-10).reverse();
+                if (items.length === 0) {
                     commentsList.innerHTML = '<div class="trash-item">No deleted comments yet.</div>';
-                }),
-                database.ref('trash/likes').once('value', (snapshot) => {
-                    const data = snapshot.val() || {};
-                    const items = Object.values(data).slice(-10).reverse();
-                    if (items.length === 0) {
-                        likesList.innerHTML = '<div class="trash-item">No deleted likes yet.</div>';
-                    } else {
-                        likesList.innerHTML = items.map(item => `<div class="trash-item"><strong>${item.user}</strong> liked post <em>${item.postSnippet || item.postKey}</em><small>deleted: ${item.deletedAtText}</small></div>`).join('');
-                    }
-                }).catch(() => {
+                } else {
+                    commentsList.innerHTML = items.map(item => `<div class="trash-item"><strong>${item.user}</strong>: ${item.text}<small>post: ${item.postKey} • deleted: ${item.deletedAtText}</small></div>`).join('');
+                }
+            }).catch(() => {
+                commentsList.innerHTML = '<div class="trash-item">No deleted comments yet.</div>';
+            });
+
+            // Likes
+            firebaseCallWithTimeout(database.ref('trash/likes'), 3000).then(snapshot => {
+                const data = snapshot.val() || {};
+                const items = Object.values(data).slice(-10).reverse();
+                if (items.length === 0) {
                     likesList.innerHTML = '<div class="trash-item">No deleted likes yet.</div>';
-                }),
-                database.ref('registered_souls').once('value', (snapshot) => {
-                    const currentUsers = snapshot.val() || {};
-                    const currentItems = Object.keys(currentUsers).sort();
-                    return database.ref('trash/clearedUsers').once('value', (clearSnapshot) => {
-                        const cleared = clearSnapshot.val() || {};
-                        const clearedItems = Object.values(cleared).sort((a, b) => b.clearedAt - a.clearedAt);
-                        const rows = [];
-                        currentItems.forEach(tag => {
-                            rows.push(`<div class="trash-item"><strong>${tag}</strong> • active</div>`);
-                        });
-                        clearedItems.slice(0, 10).forEach(item => {
-                            rows.push(`<div class="trash-item"><strong>${item.tag}</strong> • cleared ${item.clearedAtText}</div>`);
-                        });
-                        if (rows.length === 0) {
-                            usersList.innerHTML = '<div class="trash-item">No users found.</div>';
-                        } else {
-                            usersList.innerHTML = rows.join('');
-                        }
-                    });
-                }).catch(() => {
+                } else {
+                    likesList.innerHTML = items.map(item => `<div class="trash-item"><strong>${item.user}</strong> liked post <em>${item.postSnippet || item.postKey}</em><small>deleted: ${item.deletedAtText}</small></div>`).join('');
+                }
+            }).catch(() => {
+                likesList.innerHTML = '<div class="trash-item">No deleted likes yet.</div>';
+            });
+
+            // Users (current + cleared)
+            Promise.all([
+                firebaseCallWithTimeout(database.ref('registered_souls'), 3000),
+                firebaseCallWithTimeout(database.ref('trash/clearedUsers'), 3000)
+            ]).then(([currentSnap, clearSnapshot]) => {
+                const currentUsers = currentSnap.val() || {};
+                const cleared = clearSnapshot.val() || {};
+                const currentItems = Object.keys(currentUsers).sort();
+                const clearedItems = Object.values(cleared).sort((a, b) => b.clearedAt - a.clearedAt);
+
+                const rows = [];
+                currentItems.forEach(tag => {
+                    rows.push(`<div class="trash-item"><strong>${tag}</strong> • active</div>`);
+                });
+                clearedItems.slice(0, 10).forEach(item => {
+                    rows.push(`<div class="trash-item"><strong>${item.tag}</strong> • cleared ${item.clearedAtText}</div>`);
+                });
+
+                if (rows.length === 0) {
                     usersList.innerHTML = '<div class="trash-item">No users found.</div>';
-                })
-            ]);
+                } else {
+                    usersList.innerHTML = rows.join('');
+                }
+            }).catch(() => {
+                usersList.innerHTML = '<div class="trash-item">No users found.</div>';
+            });
         }
 
         // ------------------- Live Monitor: listeners, UI, and badges -------------------
@@ -4656,109 +4666,108 @@
             const commentsList = document.getElementById('live-comments-list');
             const likesList = document.getElementById('live-likes-list');
             const usersList = document.getElementById('live-users-list');
+            
             commentsList.innerHTML = '<div class="trash-item">Loading recent comments...</div>';
             likesList.innerHTML = '<div class="trash-item">Loading recent likes...</div>';
             usersList.innerHTML = '<div class="trash-item">Loading active users...</div>';
 
-            let completedSections = 0;
-            const tryShowContent = () => {
-                completedSections++;
-                if (commentsList.innerHTML === '<div class="trash-item">Loading recent comments...</div>' && likesList.innerHTML === '<div class="trash-item">Loading recent likes...</div>' && usersList.innerHTML === '<div class="trash-item">Loading active users...</div>') {
+            // Comments section
+            fetchPostsFromLocalArchive().then(() => {
+                if (globalPostsCache && globalPostsCache.length > 0) {
+                    const recent = [];
+                    globalPostsCache.forEach(post => {
+                        const w = post.whispers || {};
+                        Object.keys(w).forEach(wk => { recent.push({ postKey: post.fbKey, ...w[wk] }); });
+                    });
+                    recent.sort((a,b) => (b.timestamp||0)-(a.timestamp||0));
+                    const items = recent.slice(0,20);
+                    if (items.length === 0) commentsList.innerHTML = '<div class="trash-item">No recent comments.</div>';
+                    else commentsList.innerHTML = items.map(item => {
+                        const commenter = item.user || item.name || item.tag || item.handle || item.author || 'anon';
+                        return `<div class="trash-item"><strong>${commenter}</strong>: ${item.text||''}<small>post: ${item.postKey} • ${new Date(item.timestamp||Date.now()).toLocaleString()}</small></div>`;
+                    }).join('');
                     return;
                 }
-            };
-
-            Promise.all([
-                fetchPostsFromLocalArchive().then(() => {
-                    if (globalPostsCache && globalPostsCache.length > 0) {
-                        const recent = [];
-                        globalPostsCache.forEach(post => {
-                            const w = post.whispers || {};
-                            Object.keys(w).forEach(wk => { const it = w[wk]; recent.push({ postKey: post.fbKey, ...it }); });
-                        });
-                        recent.sort((a,b) => (b.timestamp||0)-(a.timestamp||0));
-                        const items = recent.slice(0,20);
-                        if (items.length === 0) commentsList.innerHTML = '<div class="trash-item">No recent comments.</div>';
-                        else commentsList.innerHTML = items.map(item => {
-                            const commenter = item.user || item.name || item.tag || item.handle || item.author || 'anon';
-                            return `<div class="trash-item"><strong>${commenter}</strong>: ${item.text||''}<small>post: ${item.postKey} • ${new Date(item.timestamp||Date.now()).toLocaleString()}</small></div>`;
-                        }).join('');
-                        return;
-                    }
-                    return database.ref('posts').once('value', (snapshot) => {
-                        const posts = snapshot.val() || {};
-                        const recent = [];
-                        Object.keys(posts).forEach(postKey => {
-                            const w = posts[postKey].whispers || {};
-                            Object.keys(w).forEach(wk => { const it = w[wk]; recent.push({ postKey, ...it }); });
-                        });
-                        recent.sort((a,b) => (b.timestamp||0)-(a.timestamp||0));
-                        const items = recent.slice(0,20);
-                        if (items.length === 0) commentsList.innerHTML = '<div class="trash-item">No recent comments.</div>';
-                        else commentsList.innerHTML = items.map(item => {
-                            const commenter = item.user || item.name || item.tag || item.handle || item.author || 'anon';
-                            return `<div class="trash-item"><strong>${commenter}</strong>: ${item.text||''}<small>post: ${item.postKey} • ${new Date(item.timestamp||Date.now()).toLocaleString()}</small></div>`;
-                        }).join('');
-                    });
-                }).catch(() => {
-                    commentsList.innerHTML = '<div class="trash-item">Could not load comments.</div>';
-                }),
-                database.ref('posts').once('value', (snapshot) => {
+                firebaseCallWithTimeout(database.ref('posts'), 3000).then(snapshot => {
                     const posts = snapshot.val() || {};
-                    return database.ref('registered_souls').once('value', (soulsSnap) => {
-                        const souls = soulsSnap.val() || {};
-                        const fingerprintToTag = {};
-                        Object.keys(souls).forEach(tag => { fingerprintToTag[souls[tag]] = tag; });
-                        const likesEvents = [];
-                        function pushKeyTimestamp(pushKey) {
-                            if (!pushKey) return 0;
-                            const PUSH_CHARS = "-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz";
-                            let ts = 0;
-                            for (let i = 0; i < 8 && i < pushKey.length; i++) {
-                                const idx = PUSH_CHARS.indexOf(pushKey.charAt(i));
-                                if (idx === -1) return 0;
-                                ts = ts * 64 + idx;
-                            }
-                            return ts || 0;
-                        }
-                        Object.keys(posts).forEach(postKey => {
-                            const post = posts[postKey] || {};
-                            const vr = post.voterRegistry || {};
-                            Object.keys(vr).forEach(vk => {
-                                const v = vr[vk];
-                                if (v && typeof v === 'object' && v.fingerprint) {
-                                    const ts = v.timestamp || pushKeyTimestamp(vk) || 0;
-                                    likesEvents.push({ fingerprint: v.fingerprint, tag: v.tag || fingerprintToTag[v.fingerprint] || 'anon', timestamp: ts, postKey, postText: post.text || '' });
-                                } else {
-                                    const fp = String(v);
-                                    const ts = pushKeyTimestamp(vk) || 0;
-                                    likesEvents.push({ fingerprint: fp, tag: fingerprintToTag[fp] || 'anon', timestamp: ts, postKey, postText: post.text || '' });
-                                }
-                            });
-                        });
-                        likesEvents.sort((a,b) => {
-                            const ta = a.timestamp || 0;
-                            const tb = b.timestamp || 0;
-                            if (ta === 0 && tb !== 0) return 1;
-                            if (tb === 0 && ta !== 0) return -1;
-                            return tb - ta;
-                        });
-                        const items = likesEvents.slice(0,40);
-                        if (items.length === 0) likesList.innerHTML = '<div class="trash-item">No likes yet.</div>';
-                        else likesList.innerHTML = items.map(it => `<div class="trash-item"><strong>${it.tag || 'anon'}</strong> liked <em>${(it.postText||'').slice(0,60)}</em><small>post: ${it.postKey} • ${it.timestamp ? new Date(it.timestamp).toLocaleString() : 'time unknown'}</small></div>`).join('');
+                    const recent = [];
+                    Object.keys(posts).forEach(postKey => {
+                        const w = posts[postKey].whispers || {};
+                        Object.keys(w).forEach(wk => { recent.push({ postKey, ...w[wk] }); });
                     });
+                    recent.sort((a,b) => (b.timestamp||0)-(a.timestamp||0));
+                    const items = recent.slice(0,20);
+                    if (items.length === 0) commentsList.innerHTML = '<div class="trash-item">No recent comments.</div>';
+                    else commentsList.innerHTML = items.map(item => {
+                        const commenter = item.user || item.name || item.tag || item.handle || item.author || 'anon';
+                        return `<div class="trash-item"><strong>${commenter}</strong>: ${item.text||''}<small>post: ${item.postKey} • ${new Date(item.timestamp||Date.now()).toLocaleString()}</small></div>`;
+                    }).join('');
                 }).catch(() => {
-                    likesList.innerHTML = '<div class="trash-item">Could not load likes.</div>';
-                }),
-                database.ref('registered_souls').once('value', (snapshot) => {
-                    const users = snapshot.val() || {};
-                    const keys = Object.keys(users).sort();
-                    if (keys.length === 0) usersList.innerHTML = '<div class="trash-item">No users registered.</div>';
-                    else usersList.innerHTML = keys.slice(0,50).map(u=>`<div class="trash-item"><strong>${u}</strong></div>`).join('');
-                }).catch(() => {
-                    usersList.innerHTML = '<div class="trash-item">Could not load users.</div>';
-                })
-            ]);
+                    commentsList.innerHTML = '<div class="trash-item">No recent comments.</div>';
+                });
+            }).catch(() => {
+                commentsList.innerHTML = '<div class="trash-item">No recent comments.</div>';
+            });
+
+            // Likes section
+            Promise.all([
+                firebaseCallWithTimeout(database.ref('posts'), 3000),
+                firebaseCallWithTimeout(database.ref('registered_souls'), 3000)
+            ]).then(([postsSnap, soulsSnap]) => {
+                const posts = postsSnap.val() || {};
+                const souls = soulsSnap.val() || {};
+                const fingerprintToTag = {};
+                Object.keys(souls).forEach(tag => { fingerprintToTag[souls[tag]] = tag; });
+                
+                const likesEvents = [];
+                function pushKeyTimestamp(pushKey) {
+                    if (!pushKey) return 0;
+                    const PUSH_CHARS = "-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz";
+                    let ts = 0;
+                    for (let i = 0; i < 8 && i < pushKey.length; i++) {
+                        const idx = PUSH_CHARS.indexOf(pushKey.charAt(i));
+                        if (idx === -1) return 0;
+                        ts = ts * 64 + idx;
+                    }
+                    return ts || 0;
+                }
+                Object.keys(posts).forEach(postKey => {
+                    const post = posts[postKey] || {};
+                    const vr = post.voterRegistry || {};
+                    Object.keys(vr).forEach(vk => {
+                        const v = vr[vk];
+                        if (v && typeof v === 'object' && v.fingerprint) {
+                            const ts = v.timestamp || pushKeyTimestamp(vk) || 0;
+                            likesEvents.push({ tag: v.tag || fingerprintToTag[v.fingerprint] || 'anon', timestamp: ts, postKey, postText: post.text || '' });
+                        } else {
+                            const ts = pushKeyTimestamp(vk) || 0;
+                            likesEvents.push({ tag: fingerprintToTag[String(v)] || 'anon', timestamp: ts, postKey, postText: post.text || '' });
+                        }
+                    });
+                });
+                likesEvents.sort((a,b) => {
+                    const ta = a.timestamp || 0;
+                    const tb = b.timestamp || 0;
+                    if (ta === 0 && tb !== 0) return 1;
+                    if (tb === 0 && ta !== 0) return -1;
+                    return tb - ta;
+                });
+                const items = likesEvents.slice(0,40);
+                if (items.length === 0) likesList.innerHTML = '<div class="trash-item">No likes yet.</div>';
+                else likesList.innerHTML = items.map(it => `<div class="trash-item"><strong>${it.tag}</strong> liked <em>${(it.postText||'').slice(0,60)}</em><small>post: ${it.postKey} • ${it.timestamp ? new Date(it.timestamp).toLocaleString() : 'time unknown'}</small></div>`).join('');
+            }).catch(() => {
+                likesList.innerHTML = '<div class="trash-item">No likes yet.</div>';
+            });
+
+            // Users section
+            firebaseCallWithTimeout(database.ref('registered_souls'), 3000).then(snapshot => {
+                const users = snapshot.val() || {};
+                const keys = Object.keys(users).sort();
+                if (keys.length === 0) usersList.innerHTML = '<div class="trash-item">No users registered.</div>';
+                else usersList.innerHTML = keys.slice(0,50).map(u=>`<div class="trash-item"><strong>${u}</strong></div>`).join('');
+            }).catch(() => {
+                usersList.innerHTML = '<div class="trash-item">No users registered.</div>';
+            });
         }
 
         function startLiveAutoRefresh() { stopLiveAutoRefresh(); setLiveBadge(true); liveRefreshIntervalId = setInterval(()=>{ if (document.getElementById('admin-live-panel').classList.contains('open')) loadLiveData(); else stopLiveAutoRefresh(); }, 10000); }
@@ -4770,6 +4779,14 @@
         function selectLiveTab(tab) { ['comments','likes','users'].forEach(name=>{ const tabButton = document.getElementById('live-tab-' + name); const view = document.getElementById('live-' + name + '-view'); if (tabButton && view) { const active = name === tab; tabButton.classList.toggle('active', active); view.classList.toggle('active', active); } }); try{ localStorage.setItem('live_lastSeen_' + tab, String(Date.now())); }catch(e){} liveUnseen[tab]=0; updateLiveBadges(); if (document.getElementById('admin-live-panel').classList.contains('open')) loadLiveData(); }
 
         // ------------------- end Live Monitor -------------------
+
+        // Helper to add timeout to Firebase calls
+        function firebaseCallWithTimeout(ref, timeoutMs = 3000) {
+            return Promise.race([
+                ref.once('value'),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Firebase timeout')), timeoutMs))
+            ]);
+        }
 
         function updateFileLabel() {
             const fileInput = document.getElementById('desk-media-file');
