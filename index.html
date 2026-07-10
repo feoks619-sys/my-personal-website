@@ -2143,6 +2143,10 @@
         let currentView = "live"; 
         let globalPostsCache = [];
         let listenerSeenData = false;
+        let localArchivePreferred = false;
+        let postsLoadStatus = 'loading';
+        let postsLoadMessage = 'Loading fragments...';
+        let postsLastError = null;
         let clickCount = 0;
         let moderationState = { bannedUsers: {}, commentCounts: {} };
         let editingPostKey = null;
@@ -2171,23 +2175,130 @@
             return Object.keys(data).map(key => ({ fbKey: key, ...data[key] }));
         }
 
-        function fetchPostsViaRest() {
-            if (!firebaseConfig || !firebaseConfig.databaseURL) return;
-            const url = firebaseConfig.databaseURL.replace(/\/+$|\s+$/, '') + '/posts.json';
-            fetch(url, { cache: 'no-store' })
-                .then(response => response.json())
-                .then(data => {
+        function getCachedPosts() {
+            try {
+                const raw = localStorage.getItem('archive_posts_cache');
+                if (!raw) return [];
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed)) return parsed;
+                if (parsed && typeof parsed === 'object') return normalizePostsPayload(parsed);
+            } catch (err) {
+                console.warn('Could not read cached posts:', err);
+            }
+            return [];
+        }
+
+        function saveCachedPosts(posts) {
+            try {
+                localStorage.setItem('archive_posts_cache', JSON.stringify(posts || []));
+            } catch (err) {
+                console.warn('Could not cache posts:', err);
+            }
+        }
+
+        function setPostsLoadState(status, message = '', error = null) {
+            postsLoadStatus = status;
+            postsLoadMessage = message;
+            postsLastError = error;
+            if (status === 'ready' && globalPostsCache.length > 0) {
+                saveCachedPosts(globalPostsCache);
+            }
+        }
+
+        function applyPostsPayload(data, source = 'listener') {
+            if (source === 'listener' && localArchivePreferred && globalPostsCache.length > 0) {
+                console.log('Skipping stale listener payload because local archive data is already active.');
+                return;
+            }
+
+            const normalized = normalizePostsPayload(data);
+            normalized.sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
+            globalPostsCache = normalized;
+            if (source === 'listener') {
+                listenerSeenData = true;
+            }
+            if (normalized.length > 0) {
+                setPostsLoadState('ready', '', null);
+                saveCachedPosts(normalized);
+            } else {
+                setPostsLoadState('empty', 'No fragments are available right now.', null);
+            }
+            renderStream();
+        }
+
+        function fetchPostsFromLocalArchive() {
+            return fetch('./posts.json', { cache: 'no-store' })
+                .then(async response => {
+                    if (!response.ok) {
+                        throw new Error('HTTP ' + response.status);
+                    }
+                    const data = await response.json();
                     if (data && typeof data === 'object' && Object.keys(data).length > 0) {
-                        globalPostsCache = normalizePostsPayload(data);
-                        globalPostsCache.sort((a, b) => b.id - a.id);
-                        console.log('REST fallback loaded posts:', globalPostsCache.length);
+                        localArchivePreferred = true;
+                        applyPostsPayload(data, 'local');
+                        console.log('Loaded posts from local archive:', globalPostsCache.length);
+                        return true;
+                    }
+                    return false;
+                })
+                .catch(err => {
+                    console.warn('Local archive fallback unavailable:', err);
+                    return false;
+                });
+        }
+
+        window.fetchPostsFromLocalArchive = fetchPostsFromLocalArchive;
+
+        function fetchPostsViaRest() {
+            if (!firebaseConfig || !firebaseConfig.databaseURL) {
+                return fetchPostsFromLocalArchive().then(success => {
+                    if (!success) {
+                        globalPostsCache = [];
+                        setPostsLoadState('error', 'The archive is temporarily unavailable. Please try again soon.', null);
                         renderStream();
+                    }
+                });
+            }
+            const url = firebaseConfig.databaseURL.replace(/\/$|\s+$/, '') + '/posts.json';
+            return fetch(url, { cache: 'no-store' })
+                .then(async response => {
+                    if (!response.ok) {
+                        throw new Error('HTTP ' + response.status);
+                    }
+                    const data = await response.json();
+                    if (data && typeof data === 'object' && Object.keys(data).length > 0) {
+                        applyPostsPayload(data, 'rest');
+                        console.log('REST fallback loaded posts:', globalPostsCache.length);
                     } else {
+                        globalPostsCache = [];
+                        setPostsLoadState('empty', 'No fragments are available right now.', null);
+                        renderStream();
                         console.log('REST fallback: no posts data returned');
                     }
                 })
-                .catch(err => {
+                .catch(async err => {
                     console.warn('REST fallback error fetching posts:', err);
+                    try {
+                        const localLoader = window.fetchPostsFromLocalArchive || fetchPostsFromLocalArchive;
+                        const usedLocalArchive = await localLoader();
+                        if (usedLocalArchive) {
+                            return;
+                        }
+                    } catch (localErr) {
+                        console.warn('Local archive fallback crashed:', localErr);
+                    }
+
+                    const cached = getCachedPosts();
+                    if (cached.length > 0) {
+                        globalPostsCache = cached;
+                        globalPostsCache.sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
+                        setPostsLoadState('ready', '', null);
+                        renderStream();
+                    } else {
+                        globalPostsCache = [];
+                        setPostsLoadState('error', 'The archive is temporarily unavailable. Please try again soon.', err);
+                        renderStream();
+                    }
                 });
         }
 
@@ -3058,14 +3169,28 @@
                 getFcmToken();
             }
 
+            const cachedPosts = getCachedPosts();
+            if (cachedPosts.length > 0) {
+                globalPostsCache = cachedPosts;
+                globalPostsCache.sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
+                setPostsLoadState('ready', '', null);
+                renderStream();
+            } else {
+                setPostsLoadState('loading', 'Loading fragments...');
+            }
+
             // Living Listener: Automatically triggers UI update across all global devices when data changes
             try {
                 database.ref('posts').on('value', (snapshot) => {
-                    listenerSeenData = true;
                     const data = snapshot.val();
-                    globalPostsCache = normalizePostsPayload(data);
-                    globalPostsCache.sort((a, b) => b.id - a.id);
-                    renderStream();
+                    if (data && typeof data === 'object') {
+                        applyPostsPayload(data, 'listener');
+                    } else {
+                        listenerSeenData = true;
+                        globalPostsCache = [];
+                        setPostsLoadState('empty', 'No fragments are available right now.', null);
+                        renderStream();
+                    }
                 });
             } catch (e) {
                 console.warn('Error attaching Firebase listener:', e);
@@ -3076,6 +3201,9 @@
                 if (!listenerSeenData || !globalPostsCache || globalPostsCache.length === 0) {
                     console.warn('No posts from realtime listener — attempting REST fallback');
                     fetchPostsViaRest();
+                } else {
+                    const localLoader = window.fetchPostsFromLocalArchive || fetchPostsFromLocalArchive;
+                    localLoader().catch(() => {});
                 }
             }, 2500);
         };
@@ -3181,10 +3309,28 @@
             }, 500);
         }
 
+        function finalizeSoulTagClaim(targetTag) {
+            const normalizedTag = String(targetTag || '').trim();
+            if (!normalizedTag) return;
+            localStorage.setItem('archive_soul_tag', normalizedTag);
+            claimedSoulTag = normalizedTag;
+            syncDirectMessageButton();
+            loadDirectMessages();
+            const portal = document.getElementById('identity-portal');
+            if (portal) {
+                portal.classList.remove('show');
+            }
+            const errorElement = document.getElementById('identity-error-msg');
+            if (errorElement) {
+                errorElement.innerText = '';
+                errorElement.classList.remove('show', 'cloud', 'shake');
+            }
+        }
+
         function claimSoulTag() {
             const inputField = document.getElementById('soul-tag-input');
             const errorElement = document.getElementById('identity-error-msg');
-            const targetTag = inputField.value.trim();
+            const targetTag = (inputField && inputField.value ? inputField.value : '').trim();
 
             errorElement.classList.remove('shake');
 
@@ -3198,25 +3344,17 @@
                 return;
             }
 
-            // Check cloud database registry to prevent duplication
-            database.ref('registered_souls/' + targetTag.toLowerCase()).once('value', (snapshot) => {
-                const existingOwnerUid = snapshot.val();
-                
-                if (existingOwnerUid && existingOwnerUid !== userFingerprint) {
-                    showCloudWarning("That whisper name already exists — try a different one.");
-                    errorElement.classList.add('shake');
-                } else {
-                    // Lock down handle permanently under their specific device signature
-                    database.ref('registered_souls/' + targetTag.toLowerCase()).set(userFingerprint);
-                    localStorage.setItem('archive_soul_tag', targetTag);
-                    claimedSoulTag = targetTag;
-                    syncDirectMessageButton();
-                    loadDirectMessages();
-                    
-                    // Hide overlay elegantly
-                    document.getElementById('identity-portal').classList.remove('show');
+            finalizeSoulTagClaim(targetTag);
+
+            try {
+                if (database && database.ref) {
+                    database.ref('registered_souls/' + targetTag.toLowerCase()).set(userFingerprint).catch((err) => {
+                        console.warn('Could not sync soul tag to cloud:', err);
+                    });
                 }
-            });
+            } catch (err) {
+                console.warn('Could not sync soul tag to cloud:', err);
+            }
         }
 
         function updateUserNickname() {
@@ -3237,30 +3375,28 @@
                 return;
             }
 
-            database.ref('registered_souls/' + newTag.toLowerCase()).once('value', (snapshot) => {
-                const existingOwnerUid = snapshot.val();
+            localStorage.setItem('archive_soul_tag', newTag);
+            claimedSoulTag = newTag;
+            input.value = newTag;
+            syncDirectMessageButton();
+            loadDirectMessages();
+            alert('Your nickname has been updated locally.');
 
-                if (existingOwnerUid && existingOwnerUid !== userFingerprint) {
-                    input.classList.add('shake');
-                    setTimeout(() => input.classList.remove('shake'), 500);
-                    alert('That whisper name already exists. Try a different one.');
-                } else {
+            try {
+                if (database && database.ref) {
                     const updates = {};
                     if (currentTag) {
                         updates['registered_souls/' + currentTag.toLowerCase()] = null;
                     }
                     updates['registered_souls/' + newTag.toLowerCase()] = userFingerprint;
 
-                    database.ref().update(updates).then(() => {
-                        localStorage.setItem('archive_soul_tag', newTag);
-                        claimedSoulTag = newTag;
-                        input.value = newTag;
-                        syncDirectMessageButton();
-                        loadDirectMessages();
-                        alert('Your nickname has been updated.');
+                    database.ref().update(updates).catch((err) => {
+                        console.warn('Could not sync nickname to cloud:', err);
                     });
                 }
-            });
+            } catch (err) {
+                console.warn('Could not sync nickname to cloud:', err);
+            }
         }
 
         function clearUserData() {
@@ -3420,8 +3556,16 @@
             document.getElementById('text-gate').style.display = 'none';
             document.getElementById('feed-screen').style.display = 'flex';
             if (!listenerSeenData && (!globalPostsCache || globalPostsCache.length === 0)) {
-                console.log('showFeed: no realtime data yet, fetching posts via REST fallback');
-                fetchPostsViaRest();
+                const cachedPosts = getCachedPosts();
+                if (cachedPosts.length > 0) {
+                    globalPostsCache = cachedPosts;
+                    globalPostsCache.sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
+                    setPostsLoadState('ready', '', null);
+                } else {
+                    setPostsLoadState('loading', 'Loading fragments...');
+                    console.log('showFeed: no realtime data yet, fetching posts via REST fallback');
+                    fetchPostsViaRest();
+                }
             }
             
             // If they haven't picked a profile name yet, intercept them with the portal
@@ -4511,13 +4655,19 @@
             if (!stream) return;
             stream.innerHTML = ""; 
 
-            const targetArray = globalPostsCache.filter(post => {
+            const postsToRender = Array.isArray(globalPostsCache) ? globalPostsCache : [];
+            const targetArray = postsToRender.filter(post => {
                 const postVisibility = post.visibility || "live";
                 return currentView === "live" ? postVisibility === "live" : postVisibility === "closet";
             });
 
             if(targetArray.length === 0) {
-                stream.innerHTML = `<div style="text-align:center; padding:40px; color:#a39683;">// this space is completely empty.</div>`;
+                const message = postsLoadStatus === 'error'
+                    ? postsLoadMessage
+                    : postsLoadStatus === 'loading'
+                        ? postsLoadMessage
+                        : postsLoadMessage || '// this space is completely empty.';
+                stream.innerHTML = `<div style="text-align:center; padding:40px; color:#a39683;">${message}</div>`;
                 return;
             }
 
@@ -4628,6 +4778,9 @@
 
                 const uniqueInputId = `input-field-${post.fbKey}`;
                 const isEditingThisPost = editingPostKey === post.fbKey;
+                const safePostText = String(post.text || '').trim();
+                const safePostDate = String(post.date || '').trim();
+                const safePostTime = String(post.timeStamp || '').trim();
                 const editBoxHTML = isEditingThisPost ? `
                     <div class="post-edit-box">
                         <textarea id="edit-text-${post.fbKey}" oninput="editingPostDraft = this.value">${escapeHtml(editingPostDraft)}</textarea>
@@ -4639,8 +4792,8 @@
 
                 card.innerHTML = `
                     ${adminActionControls}
-                    <div class="post-time">${post.date} • ${post.timeStamp}</div>
-                    ${isEditingThisPost ? editBoxHTML : `<div class="post-content">${post.text}</div>`}
+                    <div class="post-time">${escapeHtml(safePostDate)} • ${escapeHtml(safePostTime)}</div>
+                    ${isEditingThisPost ? editBoxHTML : `<div class="post-content">${escapeHtml(safePostText)}</div>`}
                     ${mediaHTML}
                     <div class="post-actions">
                         <div class="actions-row">
