@@ -3062,12 +3062,132 @@
             return String(value || '').trim().toLowerCase();
         }
 
+        function normalizeDmConversationMessages(messages) {
+            if (!messages) return [];
+            if (Array.isArray(messages)) {
+                return messages.filter(Boolean).map((message, index) => {
+                    if (!message || typeof message !== 'object') return message;
+                    const normalized = {
+                        ...message,
+                        fbKey: message.fbKey || message.id || message.messageId || `local-${message.timestamp || Date.now()}-${index}`,
+                        from: message.from || (message.user ? 'user' : null),
+                        userTag: message.userTag || message.user || message.displayName,
+                        text: message.text || message.content || message.message || ''
+                    };
+                    return normalized;
+                });
+            }
+            if (typeof messages === 'object') {
+                return Object.keys(messages).map(messageKey => {
+                    const msg = messages[messageKey];
+                    return {
+                        fbKey: messageKey,
+                        ...msg,
+                        from: msg.from || (msg.user ? 'user' : null),
+                        userTag: msg.userTag || msg.user || msg.displayName,
+                        text: msg.text || msg.content || msg.message || ''
+                    };
+                }).filter(Boolean);
+            }
+            return [];
+        }
+
+        function mergeNormalizedDmConversationMessages(existingMessages, incomingMessages) {
+            const merged = [...(existingMessages || []), ...(incomingMessages || [])];
+            const deduped = merged.filter((message, index, self) => index === self.findIndex(candidate => (candidate.fbKey || candidate.id || '') === (message.fbKey || message.id || '')));
+            return deduped.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+        }
+
+        function normalizeDmConversationMap(data) {
+            const result = {};
+            if (!data) return result;
+            if (Array.isArray(data)) {
+                data.forEach((entry) => {
+                    if (!entry || typeof entry !== 'object') return;
+                    const key = normalizeDmConversationKey(entry.conversationKey || entry.key || entry.userTag || entry.conversation || '');
+                    if (!key) return;
+                    const messages = Array.isArray(entry.messages)
+                        ? entry.messages
+                        : (entry && typeof entry === 'object' && entry.text !== undefined ? [entry] : []);
+                    result[key] = mergeNormalizedDmConversationMessages(result[key], normalizeDmConversationMessages(messages));
+                });
+                return result;
+            }
+            if (typeof data !== 'object') return result;
+            if (data.conversations && typeof data.conversations === 'object') {
+                return normalizeDmConversationMap(data.conversations);
+            }
+            if (data.messages && (Array.isArray(data.messages) || typeof data.messages === 'object')) {
+                const conversationKey = normalizeDmConversationKey(data.conversationKey || data.key || data.userTag || data.conversation || '');
+                if (conversationKey) {
+                    result[conversationKey] = mergeNormalizedDmConversationMessages(result[conversationKey], normalizeDmConversationMessages(data.messages));
+                    return result;
+                }
+                return normalizeDmConversationMap(data.messages);
+            }
+            Object.keys(data).forEach((entryKey) => {
+                const entryValue = data[entryKey];
+                const normalizedKey = normalizeDmConversationKey(entryKey);
+                if (!normalizedKey) return;
+                if (Array.isArray(entryValue)) {
+                    result[normalizedKey] = mergeNormalizedDmConversationMessages(result[normalizedKey], normalizeDmConversationMessages(entryValue));
+                    return;
+                }
+                if (entryValue && typeof entryValue === 'object') {
+                    const nestedMessages = normalizeDmConversationMessages(entryValue);
+                    if (nestedMessages.length > 0) {
+                        result[normalizedKey] = mergeNormalizedDmConversationMessages(result[normalizedKey], nestedMessages);
+                        return;
+                    }
+                    const nestedConversation = normalizeDmConversationMap(entryValue);
+                    Object.keys(nestedConversation).forEach((nestedKey) => {
+                        result[nestedKey] = mergeNormalizedDmConversationMessages(result[nestedKey], nestedConversation[nestedKey]);
+                    });
+                }
+            });
+            return result;
+        }
+
+        function collectDmStorageCandidates() {
+            const candidates = [];
+            try {
+                const storageKeys = ['archive_dm_conversations', 'archive_dm_conversations_v1', 'archive_dm_messages', 'archive_direct_messages', 'archive_direct_messages_cache'];
+                storageKeys.forEach((storageKey) => {
+                    const raw = localStorage.getItem(storageKey);
+                    if (!raw) return;
+                    try {
+                        candidates.push(JSON.parse(raw));
+                    } catch (err) {
+                        // ignore non-JSON entries
+                    }
+                });
+                Object.keys(localStorage).forEach((storageKey) => {
+                    if (!/(dm|direct|whisper|conversation|message)/i.test(storageKey)) return;
+                    const raw = localStorage.getItem(storageKey);
+                    if (!raw) return;
+                    try {
+                        candidates.push(JSON.parse(raw));
+                    } catch (err) {
+                        // ignore non-JSON entries
+                    }
+                });
+                if (typeof window !== 'undefined' && window.__archiveDmConversations) {
+                    candidates.push(window.__archiveDmConversations);
+                }
+            } catch (err) {
+                console.warn('Could not collect DM storage candidates:', err);
+            }
+            return candidates;
+        }
+
         function getStoredDmConversations() {
             try {
-                const raw = localStorage.getItem('archive_dm_conversations');
-                if (!raw) return {};
-                const parsed = JSON.parse(raw);
-                return parsed && typeof parsed === 'object' ? parsed : {};
+                const candidates = collectDmStorageCandidates();
+                for (const candidate of candidates) {
+                    const normalized = normalizeDmConversationMap(candidate);
+                    if (Object.keys(normalized).length > 0) return normalized;
+                }
+                return {};
             } catch (err) {
                 console.warn('Could not read stored DM conversations:', err);
                 return {};
@@ -3112,11 +3232,12 @@
             const normalizedKey = normalizeDmConversationKey(conversationKey);
             const sortedMessages = (messages || []).slice().sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
             const lastMessage = sortedMessages[sortedMessages.length - 1] || null;
-            const userMessages = sortedMessages.filter(message => message.from === 'user');
-            const participantMessage = userMessages[0] || sortedMessages.find(message => message.from === 'user') || sortedMessages[0] || null;
+            const userMessages = sortedMessages.filter(message => (message.from === 'user' || (message.user && !message.from)));
+            const participantMessage = userMessages[0] || sortedMessages.find(message => (message.from === 'user' || (message.user && !message.from))) || sortedMessages[0] || null;
+            const displayNameFromMessage = participantMessage ? (participantMessage.userTag || participantMessage.user || participantMessage.displayName || normalizedKey) : normalizedKey;
             return {
                 key: normalizedKey,
-                displayName: (participantMessage && participantMessage.userTag) ? participantMessage.userTag : normalizedKey,
+                displayName: displayNameFromMessage,
                 messages: sortedMessages.map(message => ({
                     ...message,
                     timestampText: message.timestamp ? new Date(message.timestamp).toLocaleString() : ''
@@ -3133,52 +3254,24 @@
         }
 
         function normalizeApiDmResponse(data) {
-            if (!data) return {};
-            if (Array.isArray(data)) {
-                return data.reduce((acc, message) => {
-                    if (!message || typeof message !== 'object') return acc;
-                    const key = normalizeDmConversationKey(message.conversationKey || message.key || message.userTag || '');
-                    if (!key) return acc;
-                    acc[key] = acc[key] || [];
-                    acc[key].push({
-                        ...message,
-                        fbKey: message.fbKey || message.id || `local-${message.timestamp || Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-                    });
-                    return acc;
-                }, {});
-            }
-            if (data.messages) {
-                if (Array.isArray(data.messages)) {
-                    return normalizeApiDmResponse(data.messages);
-                }
-                if (typeof data.messages === 'object') {
-                    return data.messages;
-                }
-            }
-            if (typeof data === 'object') {
-                return data;
-            }
-            return {};
+            return normalizeDmConversationMap(data);
         }
 
         function buildDmConversationFromRaw(key, rawMessages) {
             if (!key) return null;
             if (!rawMessages) return buildDmConversationPreview(key, []);
             if (Array.isArray(rawMessages)) {
-                return buildDmConversationPreview(key, rawMessages);
+                return buildDmConversationPreview(key, normalizeDmConversationMessages(rawMessages));
             }
             if (typeof rawMessages === 'object') {
-                const messages = Object.keys(rawMessages).map(messageKey => ({
-                    fbKey: messageKey,
-                    ...rawMessages[messageKey]
-                })).filter(Boolean);
-                return buildDmConversationPreview(key, messages);
+                return buildDmConversationPreview(key, normalizeDmConversationMessages(rawMessages));
             }
             return buildDmConversationPreview(key, []);
         }
 
         function buildDmConversationViewsFromRawConversations(rawConversations) {
-            return Object.keys(rawConversations || {}).map(key => buildDmConversationFromRaw(key, rawConversations[key] || [])).filter(Boolean)
+            const normalizedConversations = normalizeDmConversationMap(rawConversations);
+            return Object.keys(normalizedConversations || {}).map(key => buildDmConversationFromRaw(key, normalizedConversations[key] || [])).filter(Boolean)
                 .sort((a, b) => (b.messages[b.messages.length - 1]?.timestamp || 0) - (a.messages[a.messages.length - 1]?.timestamp || 0));
         }
 
