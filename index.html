@@ -3261,6 +3261,8 @@
 
             if (attachments.length === 0) {
                 try {
+                    const inputField = document.getElementById('dm-input');
+                    if (inputField) inputField.value = '';
                     await saveDirectMessage(text, '', null);
                     clearDmAttachment();
                 } catch (err) {
@@ -3275,6 +3277,8 @@
             const attachmentType = dmPendingAttachmentType === 'image' ? 'image' : 'audio';
 
             const statusEl = document.getElementById('dm-record-status');
+            const inputField = document.getElementById('dm-input');
+            if (inputField) inputField.value = '';
             setDmSendLoading(true, 'Uploading…');
 
             try {
@@ -4339,6 +4343,8 @@
                 return payload;
             };
             if (attachments.length === 0) {
+                const inputField = document.getElementById('admin-dm-reply-input');
+                if (inputField) inputField.value = '';
                 await sendPayload('', null);
                 return;
             }
@@ -4346,6 +4352,8 @@
                 adminDmPendingAttachmentType = 'audio';
             }
             const attachmentType = adminDmPendingAttachmentType === 'image' ? 'image' : 'audio';
+            const inputField = document.getElementById('admin-dm-reply-input');
+            if (inputField) inputField.value = '';
             setDmSendLoading(true, 'Uploading…');
             try {
                 const urls = await Promise.all(attachments.map(file => promiseWithTimeout(uploadDmAttachmentFile(file, selectedDmKey), 15000, 'DM upload timed out')));
