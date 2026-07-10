@@ -3474,7 +3474,6 @@
             claimedSoulTag = normalizedTag;
             syncDirectMessageButton();
             loadDirectMessages();
-            renderStream();
             const portal = document.getElementById('identity-portal');
             if (portal) {
                 portal.classList.remove('show');
@@ -3484,6 +3483,7 @@
                 errorElement.innerText = '';
                 errorElement.classList.remove('show', 'cloud', 'shake');
             }
+            showFeed();
         }
 
         function claimSoulTag() {
@@ -3649,13 +3649,23 @@
                     });
                 }
 
-                database.ref('trash/clearedUsers/' + normalizedTag).set({
+                const clearedUserTrash = {
+                    localId: 'trash-user-' + Date.now() + '-' + Math.random().toString(36).slice(2),
                     tag: currentTag,
                     fingerprint: userFingerprint,
                     clearedAt: deletedAt,
-                    clearedAtText: timestampText
-                });
+                    clearedAtText: timestampText,
+                    deletedBy: 'self',
+                    source: 'user'
+                };
+                database.ref('trash/clearedUsers/' + normalizedTag).set(clearedUserTrash)
+                    .catch(err => {
+                        console.warn('Could not sync cleared user to trash:', err);
+                        archiveClearedUser(clearedUserTrash);
+                    });
                 database.ref('registered_souls/' + normalizedTag).remove();
+
+                archiveClearedUser(clearedUserTrash);
 
                 localStorage.removeItem('archive_soul_tag');
                 claimedSoulTag = "";
@@ -3752,59 +3762,63 @@
 
         function toggleGlobalLike(fbKey, button, event) {
             event.stopPropagation();
-            const postRef = database.ref('posts/' + fbKey);
+            if (!claimedSoulTag) {
+                alert('Step 1: Click the icon ⚙️ in the top right\nStep 2: Enter your unique tag (nickname)\nStep 3: Click Claim Identity\n\nThen you can like!');
+                return;
+            }
 
-            postRef.once('value', (snapshot) => {
-                const post = snapshot.val();
-                if (!post) return;
+            const localCountElement = button.querySelector('.count');
+            const currentDisplayedCount = Number(localCountElement?.innerText || 0);
+            const isCurrentlyLiked = button.classList.contains('liked');
+            const willLike = !isCurrentlyLiked;
+            const newCount = willLike ? currentDisplayedCount + 1 : Math.max(0, currentDisplayedCount - 1);
 
-                const registryData = snapshot.child('voterRegistry').val() || {};
-                const entries = Object.keys(registryData).map(k => {
-                    const v = registryData[k];
-                    if (v && typeof v === 'object' && v.fingerprint) return { key: k, fingerprint: v.fingerprint, timestamp: v.timestamp || 0, tag: v.tag || null };
-                    return { key: k, fingerprint: String(v), timestamp: 0, tag: null };
-                });
+            button.classList.toggle('liked', willLike);
+            if (localCountElement) {
+                localCountElement.innerText = String(newCount);
+            }
 
-                const existing = entries.find(e => e.fingerprint === userFingerprint);
-                let currentLikes = post.likes || 0;
+            if (willLike) {
+                storePendingLike(fbKey, true);
+            } else {
+                storePendingLike(fbKey, false);
+            }
 
-                if (!existing) {
-                    const likeRecord = { fingerprint: userFingerprint, timestamp: Date.now(), tag: (claimedSoulTag || null) };
-                    database.ref('posts/' + fbKey + '/voterRegistry').push(likeRecord).catch(err => {
-                        console.warn('Like failed, storing locally:', err);
-                        storePendingLike(fbKey, true);
-                        button.classList.add('liked');
+            if (database && database.ref) {
+                const registryRef = database.ref('posts/' + fbKey + '/voterRegistry');
+                if (willLike) {
+                    const likeRecord = { fingerprint: userFingerprint, timestamp: Date.now(), tag: claimedSoulTag };
+                    const newLikeRef = registryRef.push();
+                    firebasePromiseWithTimeout(newLikeRef.set(likeRecord), 3000).catch(err => {
+                        console.warn('Like sync failed, saved locally instead:', err);
                     });
-                    currentLikes += 1;
-                    button.classList.add('liked');
                 } else {
-                    Object.keys(registryData).forEach(rk => {
-                        const v = registryData[rk];
-                        if ((v && typeof v === 'object' && v.fingerprint === userFingerprint) || String(v) === userFingerprint) {
-                            database.ref('posts/' + fbKey + '/voterRegistry/' + rk).remove().catch(err => {
-                                console.warn('Unlike failed, storing locally:', err);
-                                storePendingLike(fbKey, false);
-                                button.classList.remove('liked');
+                    archiveDeletedLike({
+                        localId: 'trash-like-' + Date.now() + '-' + Math.random().toString(36).slice(2),
+                        user: claimedSoulTag,
+                        postKey: fbKey,
+                        postSnippet: '',
+                        deletedBy: 'self',
+                        source: 'like',
+                        deletedAt: Date.now(),
+                        deletedAtText: new Date().toLocaleString()
+                    });
+                    try {
+                        firebasePromiseWithTimeout(registryRef.orderByChild('fingerprint').equalTo(userFingerprint).once('value'), 3000)
+                            .then(snapshot => {
+                                snapshot.forEach(child => {
+                                    child.ref.remove().catch(err => {
+                                        console.warn('Unlike sync failed, kept local pending unlike:', err);
+                                    });
+                                });
+                            }).catch(err => {
+                                console.warn('Unlike sync failed, saved locally instead:', err);
                             });
-                        }
-                    });
-                    currentLikes = Math.max(0, currentLikes - 1);
-                    button.classList.remove('liked');
+                    } catch (err) {
+                        console.warn('Unlike sync failed, saved locally instead:', err);
+                    }
                 }
-
-                postRef.update({ likes: currentLikes }).catch(err => {
-                    console.warn('Could not update likes count:', err);
-                });
-            }).catch(err => {
-                console.warn('Like operation failed, storing locally:', err);
-                if (button.classList.contains('liked')) {
-                    storePendingLike(fbKey, false);
-                    button.classList.remove('liked');
-                } else {
-                    storePendingLike(fbKey, true);
-                    button.classList.add('liked');
-                }
-            });
+            }
         }
 
         function toggleCommentsPanel(fbKey, button, event) {
@@ -3844,13 +3858,106 @@
         function deleteWhisper(postKey, whisperKey, event) {
             if (event) event.stopPropagation();
             if (!confirm('Delete this comment for everyone?')) return;
-            database.ref('posts/' + postKey + '/whispers/' + whisperKey).remove();
+
+            const removePendingComment = () => {
+                try {
+                    const pending = JSON.parse(localStorage.getItem('archive_pending_comments') || '{}');
+                    const commentsForPost = pending[postKey];
+                    const index = Number(whisperKey.replace('pending-', ''));
+                    if (Array.isArray(commentsForPost) && !Number.isNaN(index) && commentsForPost[index]) {
+                        const deletedComment = commentsForPost[index];
+                        archiveDeletedComment({
+                            localId: 'trash-' + Date.now() + '-pending',
+                            user: deletedComment.user || 'anonymous soul',
+                            text: deletedComment.text || '[deleted]',
+                            postKey,
+                            postSnippet: String(deletedComment.text || '').slice(0, 40),
+                            deletedBy: 'self',
+                            source: 'pendingComment',
+                            deletedAt: Date.now(),
+                            deletedAtText: new Date().toLocaleString()
+                        });
+
+                        commentsForPost.splice(index, 1);
+                        if (commentsForPost.length === 0) {
+                            delete pending[postKey];
+                        }
+                        localStorage.setItem('archive_pending_comments', JSON.stringify(pending));
+                    }
+                } catch (err) {
+                    console.warn('Could not remove local pending comment:', err);
+                }
+            };
+
+            if (whisperKey.startsWith('pending-')) {
+                removePendingComment();
+                renderStream();
+                return;
+            }
+
+            const commentRef = database.ref('posts/' + postKey + '/whispers/' + whisperKey);
+            firebasePromiseWithTimeout(commentRef.once('value'), 3000)
+                .then(snapshot => {
+                    const comment = snapshot.val() || {};
+                    const trashItem = {
+                        localId: 'trash-' + Date.now() + '-' + Math.random().toString(36).slice(2),
+                        user: comment.user || 'anonymous soul',
+                        text: comment.text || '[deleted]',
+                        postKey,
+                        postSnippet: String(comment.text || '').slice(0, 40),
+                        deletedBy: isAdminLoggedIn ? 'admin' : 'self',
+                        source: 'comment',
+                        deletedAt: Date.now(),
+                        deletedAtText: new Date().toLocaleString()
+                    };
+                    archiveDeletedComment(trashItem);
+                })
+                .catch(err => {
+                    console.warn('Could not read comment for trash archive:', err);
+                })
+                .finally(() => {
+                    firebasePromiseWithTimeout(database.ref('posts/' + postKey + '/whispers/' + whisperKey).remove(), 3000)
+                        .then(() => renderStream())
+                        .catch(err => {
+                            console.warn('Could not delete comment:', err);
+                            renderStream();
+                        });
+                });
         }
 
         function deleteReply(postKey, whisperKey, replyKey, event) {
             if (event) event.stopPropagation();
             if (!confirm('Delete this reply?')) return;
-            database.ref('posts/' + postKey + '/whispers/' + whisperKey + '/replies/' + replyKey).remove();
+
+            if (replyKey && String(replyKey).startsWith('pending-')) {
+                try {
+                    const pending = JSON.parse(localStorage.getItem('archive_pending_replies') || '{}');
+                    const repliesForPost = pending[postKey] || {};
+                    const repliesForWhisper = Array.isArray(repliesForPost[whisperKey]) ? repliesForPost[whisperKey] : [];
+                    const index = repliesForWhisper.findIndex(r => String(r.id) === replyKey);
+                    if (index !== -1) {
+                        repliesForWhisper.splice(index, 1);
+                        if (repliesForWhisper.length === 0) {
+                            delete repliesForPost[whisperKey];
+                        }
+                        if (Object.keys(repliesForPost).length === 0) {
+                            delete pending[postKey];
+                        }
+                        localStorage.setItem('archive_pending_replies', JSON.stringify(pending));
+                    }
+                } catch (err) {
+                    console.warn('Could not remove local pending reply:', err);
+                }
+                renderStream();
+                return;
+            }
+
+            firebasePromiseWithTimeout(database.ref('posts/' + postKey + '/whispers/' + whisperKey + '/replies/' + replyKey).remove(), 3000)
+                .then(() => renderStream())
+                .catch(err => {
+                    console.warn('Could not delete reply:', err);
+                    renderStream();
+                });
         }
 
         function submitWhisperReply(postKey, whisperKey, inputId, event, asAdmin = false) {
@@ -3876,28 +3983,62 @@
             }
 
             const replyPayload = {
+                id: 'pending-' + Date.now(),
                 text: replyText,
                 user: asAdmin ? 'admin' : (claimedSoulTag || 'anonymous soul'),
                 timestamp: Date.now(),
                 isAdmin: Boolean(asAdmin)
             };
 
-            database.ref('posts/' + postKey + '/whispers/' + whisperKey + '/replies').push(replyPayload);
+            storePendingReply(postKey, whisperKey, replyPayload);
             inputElement.value = "";
+            renderStream();
+
+            if (database && database.ref) {
+                const replyRef = database.ref('posts/' + postKey + '/whispers/' + whisperKey + '/replies').push();
+                firebasePromiseWithTimeout(replyRef.set(replyPayload), 3000)
+                    .catch(err => {
+                        console.warn('Reply sync failed, kept local pending reply:', err);
+                    });
+            }
+        }
+
+        function storePendingReply(fbKey, whisperKey, replyPayload) {
+            try {
+                let pending = JSON.parse(localStorage.getItem('archive_pending_replies') || '{}');
+                if (!pending[fbKey]) pending[fbKey] = {};
+                if (!Array.isArray(pending[fbKey][whisperKey])) pending[fbKey][whisperKey] = [];
+                pending[fbKey][whisperKey].push(replyPayload);
+                localStorage.setItem('archive_pending_replies', JSON.stringify(pending));
+            } catch (e) {
+                console.warn('Could not store pending reply:', e);
+            }
         }
 
         // 🚀 BROADCAST WHISPER EXECUTION (Handles both mobile arrow buttons and keyboards)
         function triggerWhisperBroadcast(fbKey, inputId) {
+            console.log('COMMENT SEND clicked - fbKey:', fbKey, 'inputId:', inputId);
             const inputElement = document.getElementById(inputId);
+            if (!inputElement) {
+                console.error('Input element not found:', inputId);
+                alert('Comment input not found. Please refresh the page.');
+                return;
+            }
             const whisperText = inputElement.value.trim();
             
-            if (whisperText === "") return;
+            if (whisperText === "") {
+                alert('Please write a comment first.');
+                return;
+            }
 
             // Enforcement wall: Force them to create profile handles if bypassed
             if (!claimedSoulTag) {
+                alert('Step 1: Click the icon ⚙️ in the top right\nStep 2: Enter your unique tag (nickname)\nStep 3: Click Claim Identity\n\nThen you can comment!');
                 document.getElementById('identity-portal').classList.add('show');
                 return;
             }
+
+            console.log('Sending comment as:', claimedSoulTag);
 
             const normalizedHandle = claimedSoulTag.toLowerCase();
             const bannedEntry = moderationState.bannedUsers[normalizedHandle];
@@ -3918,23 +4059,26 @@
                 return;
             }
 
-            database.ref('posts/' + fbKey + '/whispers').push({
-                text: whisperText,
-                user: claimedSoulTag,
-                timestamp: Date.now()
-            }).then(() => {
-                database.ref('moderation/commentCounts/' + normalizedHandle).set(currentCount + 1);
-                inputElement.value = "";
-                loadDirectMessages();
-                loadAdminDmInbox();
-            }).catch(err => {
-                console.warn('Comment failed to post to Firebase, storing locally:', err);
-                storePendingComment(fbKey, whisperText);
-                inputElement.value = "";
-                alert('Comment saved locally. Will sync when Firebase is available.');
-                loadDirectMessages();
-                loadAdminDmInbox();
-            });
+            inputElement.value = "...";
+            const commentPayload = { text: whisperText, user: claimedSoulTag, timestamp: Date.now() };
+            storePendingComment(fbKey, whisperText);
+            inputElement.value = "";
+            loadDirectMessages();
+            loadAdminDmInbox();
+            renderStream();
+
+            if (database && database.ref) {
+                const commentRef = database.ref('posts/' + fbKey + '/whispers').push();
+                firebasePromiseWithTimeout(commentRef.set(commentPayload), 3000).then(() => {
+                    try {
+                        database.ref('moderation/commentCounts/' + normalizedHandle).set(currentCount + 1);
+                    } catch (e) {
+                        console.warn('Could not update moderation counters:', e);
+                    }
+                }).catch(err => {
+                    console.warn('Comment sync failed, kept local pending comment:', err);
+                });
+            }
         }
 
         function submitWhisper(event, fbKey, inputId) {
@@ -4532,27 +4676,67 @@
             // Comments
             firebaseCallWithTimeout(database.ref('trash/comments'), 3000).then(snapshot => {
                 const data = snapshot.val() || {};
-                const items = Object.values(data).slice(-10).reverse();
+                const pendingComments = getPendingTrashItems('comments');
+                const allItems = Object.values(data).concat(pendingComments);
+                const items = allItems
+                    .filter((item, index, self) => {
+                        if (!item) return false;
+                        const key = item.localId || `${item.postKey || ''}-${item.deletedAt || 0}-${item.user || ''}-${item.text || ''}`;
+                        return index === self.findIndex(other => {
+                            if (!other) return false;
+                            const otherKey = other.localId || `${other.postKey || ''}-${other.deletedAt || 0}-${other.user || ''}-${other.text || ''}`;
+                            return key === otherKey;
+                        });
+                    })
+                    .sort((a, b) => (b.deletedAt || 0) - (a.deletedAt || 0))
+                    .slice(0, 10);
                 if (items.length === 0) {
                     commentsList.innerHTML = '<div class="trash-item">No deleted comments yet.</div>';
                 } else {
-                    commentsList.innerHTML = items.map(item => `<div class="trash-item"><strong>${item.user}</strong>: ${item.text}<small>post: ${item.postKey} • deleted: ${item.deletedAtText}</small></div>`).join('');
+                    commentsList.innerHTML = items.map(item => `<div class="trash-item"><strong>${item.user}</strong>: ${item.text}<small>post: ${item.postKey} • deleted: ${item.deletedAtText || ''}</small></div>`).join('');
                 }
             }).catch(() => {
-                commentsList.innerHTML = '<div class="trash-item">No deleted comments yet.</div>';
+                const pendingComments = getPendingTrashItems('comments');
+                if (pendingComments.length === 0) {
+                    commentsList.innerHTML = '<div class="trash-item">No deleted comments yet.</div>';
+                } else {
+                    const items = pendingComments
+                        .sort((a, b) => (b.deletedAt || 0) - (a.deletedAt || 0))
+                        .slice(0, 10);
+                    commentsList.innerHTML = items.map(item => `<div class="trash-item"><strong>${item.user}</strong>: ${item.text}<small>post: ${item.postKey} • deleted: ${item.deletedAtText || ''}</small></div>`).join('');
+                }
             });
 
             // Likes
             firebaseCallWithTimeout(database.ref('trash/likes'), 3000).then(snapshot => {
                 const data = snapshot.val() || {};
-                const items = Object.values(data).slice(-10).reverse();
+                const pendingLikes = getPendingTrashItems('likes');
+                const allItems = Object.values(data).concat(pendingLikes);
+                const items = allItems
+                    .filter((item, index, self) => {
+                        if (!item) return false;
+                        const key = item.localId || `${item.postKey || ''}-${item.deletedAt || 0}-${item.user || ''}`;
+                        return index === self.findIndex(other => {
+                            if (!other) return false;
+                            const otherKey = other.localId || `${other.postKey || ''}-${other.deletedAt || 0}-${other.user || ''}`;
+                            return key === otherKey;
+                        });
+                    })
+                    .sort((a, b) => (b.deletedAt || 0) - (a.deletedAt || 0))
+                    .slice(0, 10);
                 if (items.length === 0) {
                     likesList.innerHTML = '<div class="trash-item">No deleted likes yet.</div>';
                 } else {
-                    likesList.innerHTML = items.map(item => `<div class="trash-item"><strong>${item.user}</strong> liked post <em>${item.postSnippet || item.postKey}</em><small>deleted: ${item.deletedAtText}</small></div>`).join('');
+                    likesList.innerHTML = items.map(item => `<div class="trash-item"><strong>${item.user}</strong> liked post <em>${item.postSnippet || item.postKey}</em><small>deleted: ${item.deletedAtText || ''}</small></div>`).join('');
                 }
             }).catch(() => {
-                likesList.innerHTML = '<div class="trash-item">No deleted likes yet.</div>';
+                const pendingLikes = getPendingTrashItems('likes');
+                if (pendingLikes.length === 0) {
+                    likesList.innerHTML = '<div class="trash-item">No deleted likes yet.</div>';
+                } else {
+                    const items = pendingLikes.sort((a, b) => (b.deletedAt || 0) - (a.deletedAt || 0)).slice(0, 10);
+                    likesList.innerHTML = items.map(item => `<div class="trash-item"><strong>${item.user}</strong> liked post <em>${item.postSnippet || item.postKey}</em><small>deleted: ${item.deletedAtText || ''}</small></div>`).join('');
+                }
             });
 
             // Users (current + cleared)
@@ -4562,15 +4746,26 @@
             ]).then(([currentSnap, clearSnapshot]) => {
                 const currentUsers = currentSnap.val() || {};
                 const cleared = clearSnapshot.val() || {};
+                const pendingUsers = getPendingTrashItems('users');
                 const currentItems = Object.keys(currentUsers).sort();
-                const clearedItems = Object.values(cleared).sort((a, b) => b.clearedAt - a.clearedAt);
+                const clearedItems = Object.values(cleared).concat(pendingUsers)
+                    .filter((item, index, self) => {
+                        if (!item) return false;
+                        const key = item.localId || `${item.tag || ''}-${item.clearedAt || 0}`;
+                        return index === self.findIndex(other => {
+                            if (!other) return false;
+                            const otherKey = other.localId || `${other.tag || ''}-${other.clearedAt || 0}`;
+                            return key === otherKey;
+                        });
+                    })
+                    .sort((a, b) => (b.clearedAt || 0) - (a.clearedAt || 0));
 
                 const rows = [];
                 currentItems.forEach(tag => {
                     rows.push(`<div class="trash-item"><strong>${tag}</strong> • active</div>`);
                 });
                 clearedItems.slice(0, 10).forEach(item => {
-                    rows.push(`<div class="trash-item"><strong>${item.tag}</strong> • cleared ${item.clearedAtText}</div>`);
+                    rows.push(`<div class="trash-item"><strong>${item.tag}</strong> • cleared ${item.clearedAtText || ''}</div>`);
                 });
 
                 if (rows.length === 0) {
@@ -4579,7 +4774,14 @@
                     usersList.innerHTML = rows.join('');
                 }
             }).catch(() => {
-                usersList.innerHTML = '<div class="trash-item">No users found.</div>';
+                const pendingUsers = getPendingTrashItems('users');
+                if (pendingUsers.length === 0) {
+                    usersList.innerHTML = '<div class="trash-item">No users found.</div>';
+                } else {
+                    const rows = pendingUsers.sort((a, b) => (b.clearedAt || 0) - (a.clearedAt || 0)).slice(0, 10)
+                        .map(item => `<div class="trash-item"><strong>${item.tag}</strong> • cleared ${item.clearedAtText || ''}</div>`);
+                    usersList.innerHTML = rows.join('');
+                }
             });
         }
 
@@ -4871,6 +5073,13 @@
             ]);
         }
 
+        function firebasePromiseWithTimeout(promise, timeoutMs = 3000) {
+            return Promise.race([
+                promise,
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Firebase timeout')), timeoutMs))
+            ]);
+        }
+
         // Store pending likes locally
         function storePendingLike(fbKey, isLike = true) {
             try {
@@ -4897,6 +5106,88 @@
                 });
                 localStorage.setItem('archive_pending_comments', JSON.stringify(pending));
             } catch (e) { console.warn('Could not store pending comment:', e); }
+        }
+
+        function storePendingTrashItem(category, item) {
+            try {
+                let pendingTrash = JSON.parse(localStorage.getItem('archive_pending_trash') || '{}');
+                if (!pendingTrash[category]) pendingTrash[category] = [];
+                pendingTrash[category].push(item);
+                localStorage.setItem('archive_pending_trash', JSON.stringify(pendingTrash));
+            } catch (e) {
+                console.warn('Could not store pending trash item:', e);
+            }
+        }
+
+        function removePendingTrashItem(category, localId) {
+            try {
+                let pendingTrash = JSON.parse(localStorage.getItem('archive_pending_trash') || '{}');
+                const items = Array.isArray(pendingTrash[category]) ? pendingTrash[category] : [];
+                const filtered = items.filter(item => item.localId !== localId);
+                if (filtered.length === 0) {
+                    delete pendingTrash[category];
+                } else {
+                    pendingTrash[category] = filtered;
+                }
+                localStorage.setItem('archive_pending_trash', JSON.stringify(pendingTrash));
+            } catch (e) {
+                console.warn('Could not remove pending trash item:', e);
+            }
+        }
+
+        function getPendingTrashItems(category) {
+            try {
+                const pendingTrash = JSON.parse(localStorage.getItem('archive_pending_trash') || '{}');
+                return Array.isArray(pendingTrash[category]) ? pendingTrash[category] : [];
+            } catch (e) {
+                console.warn('Could not read pending trash items:', e);
+                return [];
+            }
+        }
+
+        function archiveDeletedComment(trashItem) {
+            trashItem.localId = trashItem.localId || ('trash-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+            trashItem.deletedAt = trashItem.deletedAt || Date.now();
+            trashItem.deletedAtText = trashItem.deletedAtText || new Date(trashItem.deletedAt).toLocaleString();
+            storePendingTrashItem('comments', trashItem);
+            if (database && database.ref) {
+                const ref = database.ref('trash/comments').push();
+                firebasePromiseWithTimeout(ref.set(trashItem), 3000)
+                    .then(() => removePendingTrashItem('comments', trashItem.localId))
+                    .catch(err => {
+                        console.warn('Could not sync deleted comment to trash:', err);
+                    });
+            }
+        }
+
+        function archiveDeletedLike(trashItem) {
+            trashItem.localId = trashItem.localId || ('trash-like-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+            trashItem.deletedAt = trashItem.deletedAt || Date.now();
+            trashItem.deletedAtText = trashItem.deletedAtText || new Date(trashItem.deletedAt).toLocaleString();
+            storePendingTrashItem('likes', trashItem);
+            if (database && database.ref) {
+                const ref = database.ref('trash/likes').push();
+                firebasePromiseWithTimeout(ref.set(trashItem), 3000)
+                    .then(() => removePendingTrashItem('likes', trashItem.localId))
+                    .catch(err => {
+                        console.warn('Could not sync deleted like to trash:', err);
+                    });
+            }
+        }
+
+        function archiveClearedUser(trashItem) {
+            trashItem.localId = trashItem.localId || ('trash-user-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+            trashItem.clearedAt = trashItem.clearedAt || Date.now();
+            trashItem.clearedAtText = trashItem.clearedAtText || new Date(trashItem.clearedAt).toLocaleString();
+            storePendingTrashItem('users', trashItem);
+            if (database && database.ref) {
+                const ref = database.ref('trash/clearedUsers/' + (String(trashItem.tag || '').toLowerCase() || 'unknown'));
+                firebasePromiseWithTimeout(ref.set(trashItem), 3000)
+                    .then(() => removePendingTrashItem('users', trashItem.localId))
+                    .catch(err => {
+                        console.warn('Could not sync cleared user to trash:', err);
+                    });
+            }
         }
 
         function updateFileLabel() {
@@ -5104,12 +5395,46 @@
                     }
                     return String(entry) === userFingerprint;
                 });
-                const currentLikesCount = post.likes || 0;
-                const heartSymbol = hasBeenLikedByMe ? "♥" : "♡";
-                const likedClass = hasBeenLikedByMe ? "liked" : "";
+
+                let currentLikesCount = Number(post.likes || 0);
+                let effectiveLiked = hasBeenLikedByMe;
+                try {
+                    const pendingLikes = JSON.parse(localStorage.getItem('archive_pending_likes') || '{}');
+                    const pending = pendingLikes[post.fbKey];
+                    if (pending && pending.fingerprint === userFingerprint) {
+                        if (pending.action === 'like' && !hasBeenLikedByMe) {
+                            effectiveLiked = true;
+                            currentLikesCount += 1;
+                        }
+                        if (pending.action === 'unlike' && hasBeenLikedByMe) {
+                            effectiveLiked = false;
+                            currentLikesCount = Math.max(0, currentLikesCount - 1);
+                        }
+                    }
+                } catch (e) {
+                    console.warn('Could not read pending likes from localStorage:', e);
+                }
+                const heartSymbol = effectiveLiked ? "♥" : "♡";
+                const likedClass = effectiveLiked ? "liked" : "";
 
                 // Calculate exact whispers counts automatically
                 const whisperEntries = post.whispers ? Object.entries(post.whispers) : [];
+                try {
+                    const pendingComments = JSON.parse(localStorage.getItem('archive_pending_comments') || '{}');
+                    const pendingForPost = pendingComments[post.fbKey];
+                    if (Array.isArray(pendingForPost)) {
+                        pendingForPost.forEach((comment, idx) => {
+                            whisperEntries.push([`pending-${idx}`, {
+                                text: comment.text || '',
+                                user: comment.user || comment.tag || 'anonymous soul',
+                                timestamp: comment.timestamp || Date.now(),
+                                isPending: true
+                            }]);
+                        });
+                    }
+                } catch (e) {
+                    console.warn('Could not read pending comments from localStorage:', e);
+                }
                 const whisperCount = whisperEntries.length;
 
                 let whispersHTML = "";
@@ -5119,7 +5444,19 @@
                         const userHandle = w.user || "anonymous soul";
                         const letterIcon = userHandle.charAt(0).toUpperCase();
                         const bubbleBg = getAvatarColor(userHandle);
-                        const replies = w.replies ? Object.values(w.replies) : [];
+                        const replyEntries = w.replies ? Object.entries(w.replies) : [];
+                        try {
+                            const pendingReplies = JSON.parse(localStorage.getItem('archive_pending_replies') || '{}');
+                            const pendingForPost = pendingReplies[post.fbKey] || {};
+                            const pendingForWhisper = pendingForPost[whisperKey] || [];
+                            if (Array.isArray(pendingForWhisper)) {
+                                pendingForWhisper.forEach(reply => {
+                                    replyEntries.push([reply.id || `pending-${Date.now()}`, reply]);
+                                });
+                            }
+                        } catch (e) {
+                            console.warn('Could not read pending replies from localStorage:', e);
+                        }
                         const normalizedHandle = userHandle.toLowerCase();
                         const normalizedCurrentTag = String(claimedSoulTag || '').trim().toLowerCase();
                         const canDeleteWhisper = isAdminLoggedIn || (w.user && String(w.user).trim().toLowerCase() === normalizedCurrentTag);
@@ -5143,13 +5480,12 @@
                                         <input type="text" id="${replyInputId}" placeholder="${replyPlaceholder}">
                                         <button type="button" onclick="submitWhisperReply('${post.fbKey}', '${whisperKey}', '${replyInputId}', event, ${isAdminLoggedIn})">reply</button>
                                     </div>
-                                    ${replies.length > 0 ? `
+                                    ${replyEntries.length > 0 ? `
                                         <div class="reply-list">
-                                            ${replies.map(reply => {
+                                            ${replyEntries.map(([replyKey, reply]) => {
                                                 const isAdminReply = Boolean(reply.isAdmin || reply.user === 'admin' || reply.user === 'official');
                                                 const replyName = isAdminReply ? 'admin reply' : '@' + (reply.user || 'unknown');
                                                 const canDelete = isAdminLoggedIn || (reply.user && String(reply.user).trim().toLowerCase() === normalizedCurrentTag);
-                                                const replyKey = Object.keys(w.replies).find(key => w.replies[key] === reply);
                                                 return `
                                                     <div class="reply-bubble">
                                                         <div class="reply-meta">
