@@ -2611,12 +2611,22 @@
                 renderDirectMessages([]);
             }
 
+            fetchDirectMessagesFromApi(key).then((apiMessages) => {
+                const mergedMessages = [...localMessages, ...apiMessages]
+                    .filter((message, index, self) => index === self.findIndex(candidate => candidate.fbKey === message.fbKey))
+                    .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+                directMessagesCache = mergedMessages;
+                renderDirectMessages(mergedMessages);
+            }).catch(() => {});
+
             dmMessagesRef = database.ref('direct_messages/' + key);
             dmMessagesListener = (snapshot) => {
                 const rawMessages = snapshot.val() || {};
                 const ordered = Object.keys(rawMessages).map(itemKey => ({ fbKey: itemKey, ...rawMessages[itemKey] }))
                     .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-                const mergedMessages = ordered.length > 0 ? ordered : localMessages;
+                const mergedMessages = [...localMessages, ...ordered]
+                    .filter((message, index, self) => index === self.findIndex(candidate => candidate.fbKey === message.fbKey))
+                    .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
                 directMessagesCache = mergedMessages;
                 renderDirectMessages(mergedMessages);
             };
@@ -3100,7 +3110,35 @@
             return Object.keys(conversations).map(key => buildDmConversationPreview(key, conversations[key] || [])).sort((a, b) => (b.messages[b.messages.length - 1]?.timestamp || 0) - (a.messages[a.messages.length - 1]?.timestamp || 0));
         }
 
-        function saveDirectMessage(text, mediaUrl, mediaType) {
+        async function fetchDirectMessagesFromApi(conversationKey) {
+            try {
+                const query = conversationKey ? '?conversation=' + encodeURIComponent(conversationKey) : '';
+                const response = await fetch('/api/direct-messages' + query, { cache: 'no-store' });
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                const data = await response.json();
+                return data && Array.isArray(data.messages) ? data.messages : [];
+            } catch (err) {
+                console.warn('Could not load DM messages from API:', err);
+                return [];
+            }
+        }
+
+        async function saveDirectMessageToApi(conversationKey, payload) {
+            try {
+                const response = await fetch('/api/direct-messages', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ conversationKey, payload })
+                });
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                return await response.json();
+            } catch (err) {
+                console.warn('Could not save DM message to API:', err);
+                return null;
+            }
+        }
+
+        async function saveDirectMessage(text, mediaUrl, mediaType) {
             const key = normalizeDmConversationKey(claimedSoulTag || localStorage.getItem('archive_soul_tag'));
             if (!key) return Promise.reject(new Error('No conversation key'));
             const payload = {
@@ -3117,22 +3155,25 @@
                 directMessagesCache = localMessages;
                 renderDirectMessages(localMessages);
             }
-            return database.ref('direct_messages/' + key).push(payload).then(() => {
-                const input = document.getElementById('dm-input');
-                if (input) input.value = '';
-                clearDmAttachment();
-                loadDirectMessages();
-                loadAdminDmInbox();
-                return payload;
-            }).catch(err => {
+
+            try {
+                await saveDirectMessageToApi(key, payload);
+            } catch (err) {
+                console.warn('API DM save failed:', err);
+            }
+
+            try {
+                await database.ref('direct_messages/' + key).push(payload);
+            } catch (err) {
                 console.warn('DM send failed, stored locally instead:', err);
-                const input = document.getElementById('dm-input');
-                if (input) input.value = '';
-                clearDmAttachment();
-                loadDirectMessages();
-                loadAdminDmInbox();
-                return payload;
-            });
+            }
+
+            const input = document.getElementById('dm-input');
+            if (input) input.value = '';
+            clearDmAttachment();
+            loadDirectMessages();
+            loadAdminDmInbox();
+            return payload;
         }
 
         async function sendDmMessage() {
@@ -4262,7 +4303,7 @@
                 alert('Write a reply or attach a photo or voicemail first.');
                 return;
             }
-            const sendPayload = (mediaUrl, mediaType) => {
+            const sendPayload = async (mediaUrl, mediaType) => {
                 const payload = {
                     from: 'admin',
                     userTag: 'The Keeper',
@@ -4273,16 +4314,21 @@
                     isOfficial: true
                 };
                 persistDmMessageLocally(selectedDmKey, payload);
+                try {
+                    await saveDirectMessageToApi(selectedDmKey, payload);
+                } catch (err) {
+                    console.warn('Admin DM API save failed:', err);
+                }
+                try {
+                    await database.ref('direct_messages/' + selectedDmKey).push(payload);
+                } catch (err) {
+                    console.warn('Admin DM send failed, stored locally instead:', err);
+                }
                 if (input) input.value = '';
                 clearAdminDmAttachment();
                 loadDirectMessages();
                 loadAdminDmInbox();
-                return database.ref('direct_messages/' + selectedDmKey).push(payload).then(() => {
-                    return payload;
-                }).catch(err => {
-                    console.warn('Admin DM send failed, stored locally instead:', err);
-                    return payload;
-                });
+                return payload;
             };
             if (attachments.length === 0) {
                 await sendPayload('', null);
@@ -4324,9 +4370,58 @@
                 renderDmInbox([]);
             }
 
+            fetchDirectMessagesFromApi().then((apiMessages) => {
+                const apiConversations = Object.keys(apiMessages || {}).map(key => {
+                    const messageEntries = Object.entries(apiMessages[key] || {}).filter(([, value]) => Boolean(value));
+                    const messages = messageEntries.map(([messageKey, value]) => ({ fbKey: messageKey, ...value }));
+                    const sortedMessages = messages.slice().sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+                    const lastMessage = sortedMessages[sortedMessages.length - 1] || null;
+                    const userMessages = sortedMessages.filter(message => message.from === 'user');
+                    const lastUserMessage = userMessages[userMessages.length - 1] || null;
+                    const participantMessage = userMessages[0] || sortedMessages.find(message => message.from === 'user');
+                    return {
+                        key,
+                        displayName: (participantMessage && participantMessage.userTag) ? participantMessage.userTag : key,
+                        messages: sortedMessages.map(message => ({
+                            ...message,
+                            timestampText: message.timestamp ? new Date(message.timestamp).toLocaleString() : ''
+                        })),
+                        lastUserMessageTimestamp: lastUserMessage ? (lastUserMessage.timestamp || 0) : 0,
+                        lastMessageText: lastMessage ? (lastMessage.deleted ? 'deleted message' : lastMessage.text || (lastMessage.mediaType === 'image' ? '[photo]' : lastMessage.mediaType === 'audio' ? '[voicemail]' : '')) : 'No messages yet',
+                        lastMessageTime: lastMessage && lastMessage.timestamp ? new Date(lastMessage.timestamp).toLocaleString() : ''
+                    };
+                }).sort((a, b) => (b.messages[b.messages.length - 1]?.timestamp || 0) - (a.messages[a.messages.length - 1]?.timestamp || 0));
+
+                const mergedConversations = apiConversations.length > 0
+                    ? apiConversations.map(conversation => {
+                        const localConversation = localConversations.find(item => item.key === conversation.key);
+                        if (!localConversation || !localConversation.messages || localConversation.messages.length === 0) {
+                            return conversation;
+                        }
+                        const combinedMessages = [...localConversation.messages, ...conversation.messages]
+                            .filter((message, index, self) => index === self.findIndex(candidate => candidate.fbKey === message.fbKey))
+                            .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+                        return {
+                            ...conversation,
+                            messages: combinedMessages,
+                            lastUserMessageTimestamp: combinedMessages.filter(message => message.from === 'user').slice(-1)[0]?.timestamp || 0,
+                            lastMessageText: combinedMessages[combinedMessages.length - 1] ? (combinedMessages[combinedMessages.length - 1].deleted ? 'deleted message' : combinedMessages[combinedMessages.length - 1].text || (combinedMessages[combinedMessages.length - 1].mediaType === 'image' ? '[photo]' : combinedMessages[combinedMessages.length - 1].mediaType === 'audio' ? '[voicemail]' : '')) : 'No messages yet',
+                            lastMessageTime: combinedMessages[combinedMessages.length - 1] && combinedMessages[combinedMessages.length - 1].timestamp ? new Date(combinedMessages[combinedMessages.length - 1].timestamp).toLocaleString() : ''
+                        };
+                    })
+                    : localConversations;
+
+                dmInboxConversations = mergedConversations;
+                renderDmInbox(mergedConversations);
+            }).catch(err => {
+                console.warn('Could not load admin DM inbox from API:', err);
+                dmInboxConversations = localConversations;
+                renderDmInbox(localConversations);
+            });
+
             database.ref('direct_messages').once('value').then((snapshot) => {
                 const data = snapshot.val() || {};
-                const conversations = Object.keys(data).map(key => {
+                const remoteConversations = Object.keys(data).map(key => {
                     const messageEntries = Object.entries(data[key] || {}).filter(([, value]) => Boolean(value));
                     const messages = messageEntries.map(([messageKey, value]) => ({ fbKey: messageKey, ...value }));
                     const sortedMessages = messages.slice().sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
@@ -4347,13 +4442,15 @@
                     };
                 }).sort((a, b) => (b.messages[b.messages.length - 1]?.timestamp || 0) - (a.messages[a.messages.length - 1]?.timestamp || 0));
 
-                const mergedConversations = conversations.length > 0
-                    ? conversations.map(conversation => {
+                const mergedConversations = remoteConversations.length > 0
+                    ? remoteConversations.map(conversation => {
                         const localConversation = localConversations.find(item => item.key === conversation.key);
                         if (!localConversation || !localConversation.messages || localConversation.messages.length === 0) {
                             return conversation;
                         }
-                        const combinedMessages = [...localConversation.messages, ...conversation.messages].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+                        const combinedMessages = [...localConversation.messages, ...conversation.messages]
+                            .filter((message, index, self) => index === self.findIndex(candidate => candidate.fbKey === message.fbKey))
+                            .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
                         return {
                             ...conversation,
                             messages: combinedMessages,
@@ -4370,6 +4467,7 @@
                 console.warn('Could not load admin DM inbox from Firebase:', err);
                 dmInboxConversations = localConversations;
                 renderDmInbox(localConversations);
+            });
         }
 
         function loadAdminTrashData() {
