@@ -3758,7 +3758,6 @@
                 if (!post) return;
 
                 const registryData = snapshot.child('voterRegistry').val() || {};
-                // Normalize registry entries to objects { fingerprint, timestamp, tag? }
                 const entries = Object.keys(registryData).map(k => {
                     const v = registryData[k];
                     if (v && typeof v === 'object' && v.fingerprint) return { key: k, fingerprint: v.fingerprint, timestamp: v.timestamp || 0, tag: v.tag || null };
@@ -3770,20 +3769,40 @@
 
                 if (!existing) {
                     const likeRecord = { fingerprint: userFingerprint, timestamp: Date.now(), tag: (claimedSoulTag || null) };
-                    database.ref('posts/' + fbKey + '/voterRegistry').push(likeRecord);
+                    database.ref('posts/' + fbKey + '/voterRegistry').push(likeRecord).catch(err => {
+                        console.warn('Like failed, storing locally:', err);
+                        storePendingLike(fbKey, true);
+                        button.classList.add('liked');
+                    });
                     currentLikes += 1;
+                    button.classList.add('liked');
                 } else {
-                    // Remove any registry entries that match our fingerprint (object or raw string)
                     Object.keys(registryData).forEach(rk => {
                         const v = registryData[rk];
                         if ((v && typeof v === 'object' && v.fingerprint === userFingerprint) || String(v) === userFingerprint) {
-                            database.ref('posts/' + fbKey + '/voterRegistry/' + rk).remove();
+                            database.ref('posts/' + fbKey + '/voterRegistry/' + rk).remove().catch(err => {
+                                console.warn('Unlike failed, storing locally:', err);
+                                storePendingLike(fbKey, false);
+                                button.classList.remove('liked');
+                            });
                         }
                     });
                     currentLikes = Math.max(0, currentLikes - 1);
+                    button.classList.remove('liked');
                 }
 
-                postRef.update({ likes: currentLikes });
+                postRef.update({ likes: currentLikes }).catch(err => {
+                    console.warn('Could not update likes count:', err);
+                });
+            }).catch(err => {
+                console.warn('Like operation failed, storing locally:', err);
+                if (button.classList.contains('liked')) {
+                    storePendingLike(fbKey, false);
+                    button.classList.remove('liked');
+                } else {
+                    storePendingLike(fbKey, true);
+                    button.classList.add('liked');
+                }
             });
         }
 
@@ -3902,9 +3921,19 @@
                 text: whisperText,
                 user: claimedSoulTag,
                 timestamp: Date.now()
+            }).then(() => {
+                database.ref('moderation/commentCounts/' + normalizedHandle).set(currentCount + 1);
+                inputElement.value = "";
+                loadDirectMessages();
+                loadAdminDmInbox();
+            }).catch(err => {
+                console.warn('Comment failed to post to Firebase, storing locally:', err);
+                storePendingComment(fbKey, whisperText);
+                inputElement.value = "";
+                alert('Comment saved locally. Will sync when Firebase is available.');
+                loadDirectMessages();
+                loadAdminDmInbox();
             });
-            database.ref('moderation/commentCounts/' + normalizedHandle).set(currentCount + 1);
-            inputElement.value = "";
         }
 
         function submitWhisper(event, fbKey, inputId) {
@@ -4679,12 +4708,22 @@
                         const w = post.whispers || {};
                         Object.keys(w).forEach(wk => { recent.push({ postKey: post.fbKey, ...w[wk] }); });
                     });
+                    // Add pending comments
+                    try {
+                        const pending = JSON.parse(localStorage.getItem('archive_pending_comments') || '{}');
+                        Object.keys(pending).forEach(postKey => {
+                            if (Array.isArray(pending[postKey])) {
+                                pending[postKey].forEach(c => recent.push({ postKey, ...c, isPending: true }));
+                            }
+                        });
+                    } catch (e) {}
                     recent.sort((a,b) => (b.timestamp||0)-(a.timestamp||0));
                     const items = recent.slice(0,20);
                     if (items.length === 0) commentsList.innerHTML = '<div class="trash-item">No recent comments.</div>';
                     else commentsList.innerHTML = items.map(item => {
                         const commenter = item.user || item.name || item.tag || item.handle || item.author || 'anon';
-                        return `<div class="trash-item"><strong>${commenter}</strong>: ${item.text||''}<small>post: ${item.postKey} • ${new Date(item.timestamp||Date.now()).toLocaleString()}</small></div>`;
+                        const pending = item.isPending ? ' [pending]' : '';
+                        return `<div class="trash-item"><strong>${commenter}</strong>: ${item.text||''}<small>post: ${item.postKey} • ${new Date(item.timestamp||Date.now()).toLocaleString()}${pending}</small></div>`;
                     }).join('');
                     return;
                 }
@@ -4695,12 +4734,22 @@
                         const w = posts[postKey].whispers || {};
                         Object.keys(w).forEach(wk => { recent.push({ postKey, ...w[wk] }); });
                     });
+                    // Add pending comments
+                    try {
+                        const pending = JSON.parse(localStorage.getItem('archive_pending_comments') || '{}');
+                        Object.keys(pending).forEach(postKey => {
+                            if (Array.isArray(pending[postKey])) {
+                                pending[postKey].forEach(c => recent.push({ postKey, ...c, isPending: true }));
+                            }
+                        });
+                    } catch (e) {}
                     recent.sort((a,b) => (b.timestamp||0)-(a.timestamp||0));
                     const items = recent.slice(0,20);
                     if (items.length === 0) commentsList.innerHTML = '<div class="trash-item">No recent comments.</div>';
                     else commentsList.innerHTML = items.map(item => {
                         const commenter = item.user || item.name || item.tag || item.handle || item.author || 'anon';
-                        return `<div class="trash-item"><strong>${commenter}</strong>: ${item.text||''}<small>post: ${item.postKey} • ${new Date(item.timestamp||Date.now()).toLocaleString()}</small></div>`;
+                        const pending = item.isPending ? ' [pending]' : '';
+                        return `<div class="trash-item"><strong>${commenter}</strong>: ${item.text||''}<small>post: ${item.postKey} • ${new Date(item.timestamp||Date.now()).toLocaleString()}${pending}</small></div>`;
                     }).join('');
                 }).catch(() => {
                     commentsList.innerHTML = '<div class="trash-item">No recent comments.</div>';
@@ -4745,6 +4794,16 @@
                         }
                     });
                 });
+                // Add pending likes
+                try {
+                    const pending = JSON.parse(localStorage.getItem('archive_pending_likes') || '{}');
+                    Object.keys(pending).forEach(postKey => {
+                        const p = pending[postKey];
+                        if (p && p.action === 'like') {
+                            likesEvents.push({ tag: p.tag || 'anon', timestamp: p.timestamp, postKey, postText: '', isPending: true });
+                        }
+                    });
+                } catch (e) {}
                 likesEvents.sort((a,b) => {
                     const ta = a.timestamp || 0;
                     const tb = b.timestamp || 0;
@@ -4754,9 +4813,32 @@
                 });
                 const items = likesEvents.slice(0,40);
                 if (items.length === 0) likesList.innerHTML = '<div class="trash-item">No likes yet.</div>';
-                else likesList.innerHTML = items.map(it => `<div class="trash-item"><strong>${it.tag}</strong> liked <em>${(it.postText||'').slice(0,60)}</em><small>post: ${it.postKey} • ${it.timestamp ? new Date(it.timestamp).toLocaleString() : 'time unknown'}</small></div>`).join('');
+                else likesList.innerHTML = items.map(it => {
+                    const pending = it.isPending ? ' [pending]' : '';
+                    return `<div class="trash-item"><strong>${it.tag}</strong> liked <em>${(it.postText||'').slice(0,60)}</em><small>post: ${it.postKey} • ${it.timestamp ? new Date(it.timestamp).toLocaleString() : 'time unknown'}${pending}</small></div>`;
+                }).join('');
             }).catch(() => {
-                likesList.innerHTML = '<div class="trash-item">No likes yet.</div>';
+                // Show pending likes if Firebase fails
+                try {
+                    const pending = JSON.parse(localStorage.getItem('archive_pending_likes') || '{}');
+                    const likesEvents = [];
+                    Object.keys(pending).forEach(postKey => {
+                        const p = pending[postKey];
+                        if (p && p.action === 'like') {
+                            likesEvents.push({ tag: p.tag || 'anon', timestamp: p.timestamp, postKey, isPending: true });
+                        }
+                    });
+                    likesEvents.sort((a,b) => (b.timestamp||0)-(a.timestamp||0));
+                    if (likesEvents.length === 0) {
+                        likesList.innerHTML = '<div class="trash-item">No likes yet.</div>';
+                    } else {
+                        likesList.innerHTML = likesEvents.map(it => {
+                            return `<div class="trash-item"><strong>${it.tag}</strong> liked <small>post: ${it.postKey} • ${it.timestamp ? new Date(it.timestamp).toLocaleString() : 'time unknown'} [pending]</small></div>`;
+                        }).join('');
+                    }
+                } catch (e) {
+                    likesList.innerHTML = '<div class="trash-item">No likes yet.</div>';
+                }
             });
 
             // Users section
@@ -4786,6 +4868,34 @@
                 ref.once('value'),
                 new Promise((_, reject) => setTimeout(() => reject(new Error('Firebase timeout')), timeoutMs))
             ]);
+        }
+
+        // Store pending likes locally
+        function storePendingLike(fbKey, isLike = true) {
+            try {
+                let pending = JSON.parse(localStorage.getItem('archive_pending_likes') || '{}');
+                if (isLike) {
+                    pending[fbKey] = { action: 'like', timestamp: Date.now(), fingerprint: userFingerprint, tag: claimedSoulTag };
+                } else {
+                    pending[fbKey] = { action: 'unlike', timestamp: Date.now(), fingerprint: userFingerprint, tag: claimedSoulTag };
+                }
+                localStorage.setItem('archive_pending_likes', JSON.stringify(pending));
+            } catch (e) { console.warn('Could not store pending like:', e); }
+        }
+
+        // Store pending comments locally
+        function storePendingComment(fbKey, text) {
+            try {
+                let pending = JSON.parse(localStorage.getItem('archive_pending_comments') || '{}');
+                if (!pending[fbKey]) pending[fbKey] = [];
+                pending[fbKey].push({
+                    text,
+                    user: claimedSoulTag,
+                    timestamp: Date.now(),
+                    fingerprint: userFingerprint
+                });
+                localStorage.setItem('archive_pending_comments', JSON.stringify(pending));
+            } catch (e) { console.warn('Could not store pending comment:', e); }
         }
 
         function updateFileLabel() {
