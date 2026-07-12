@@ -1,0 +1,10 @@
+# Local backups and temporary files
+backup_*/
+backup_*.zip
+server.log
+*.log
+
+# Local Python/IDE artifacts
+.venv/
+__pycache__/
+.vscode/
