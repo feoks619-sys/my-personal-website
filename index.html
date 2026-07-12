@@ -9,13 +9,13 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <meta name="app-version" content="20260705-4">
+    <meta name="app-version" content="20260705-5">
     <!-- Bump the typed.js query to force reload when we update the page -->
     <script src="https://unpkg.com/typed.js@2.1.0/dist/typed.umd.js?v=2"></script>
     <script>
         (function () {
             try {
-                const appVersion = '20260705-4';
+                const appVersion = '20260705-5';
                 const currentUrl = new URL(window.location.href);
                 const storedVersion = localStorage.getItem('archive_app_version');
                 const needsVersionQuery = !currentUrl.searchParams.get('v');
@@ -2197,6 +2197,49 @@
             }
         }
 
+        function mergePostsLists(existingPosts, incomingPosts) {
+            const normalizedExisting = Array.isArray(existingPosts) ? existingPosts : [];
+            const normalizedIncoming = Array.isArray(incomingPosts) ? incomingPosts : [];
+            const merged = new Map();
+
+            const addPost = (post) => {
+                if (!post || typeof post !== 'object') return;
+                const key = String(post.fbKey || post.id || '').trim();
+                if (!key) return;
+                const normalizedPost = { ...post, fbKey: key };
+                const existing = merged.get(key);
+                if (!existing) {
+                    merged.set(key, normalizedPost);
+                    return;
+                }
+                const incomingScore = Number(normalizedPost.id || normalizedPost.timestamp || 0);
+                const existingScore = Number(existing.id || existing.timestamp || 0);
+                const shouldReplace = incomingScore > existingScore || (normalizedPost.pending === false && existing.pending === true);
+                if (shouldReplace) {
+                    merged.set(key, normalizedPost);
+                }
+            };
+
+            normalizedExisting.forEach(addPost);
+            normalizedIncoming.forEach(addPost);
+
+            return Array.from(merged.values()).sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
+        }
+
+        function addPendingPostToCache(postData) {
+            const pendingPost = {
+                ...postData,
+                fbKey: `local-${postData.id || Date.now()}`,
+                pending: true,
+                visibility: postData.visibility || 'live'
+            };
+            globalPostsCache = mergePostsLists(globalPostsCache, [pendingPost]);
+            saveCachedPosts(globalPostsCache);
+            setPostsLoadState('ready', '', null);
+            renderStream();
+            return pendingPost;
+        }
+
         function setPostsLoadState(status, message = '', error = null) {
             postsLoadStatus = status;
             postsLoadMessage = message;
@@ -2207,20 +2250,20 @@
         }
 
         function applyPostsPayload(data, source = 'listener') {
-            if (source === 'listener' && localArchivePreferred && globalPostsCache.length > 0) {
-                console.log('Skipping stale listener payload because local archive data is already active.');
-                return;
-            }
-
             const normalized = normalizePostsPayload(data);
             normalized.sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
-            globalPostsCache = normalized;
+
+            const mergedPosts = Array.isArray(globalPostsCache) && globalPostsCache.length > 0
+                ? mergePostsLists(globalPostsCache, normalized)
+                : normalized;
+
+            globalPostsCache = mergedPosts;
             if (source === 'listener') {
                 listenerSeenData = true;
             }
-            if (normalized.length > 0) {
+            if (mergedPosts.length > 0) {
                 setPostsLoadState('ready', '', null);
-                saveCachedPosts(normalized);
+                saveCachedPosts(mergedPosts);
             } else {
                 setPostsLoadState('empty', 'No fragments are available right now.', null);
             }
@@ -5334,10 +5377,12 @@
 
         // Publish a new admin post
         function publishThought() {
-            const content = document.getElementById('desk-thought').value.trim();
+            const contentInput = document.getElementById('desk-thought');
             const fileInput = document.getElementById('desk-media-file');
+            const content = contentInput ? contentInput.value.trim() : '';
+            const hasFiles = fileInput && fileInput.files && fileInput.files.length > 0;
             
-            if (content === "" && fileInput.files.length === 0) {
+            if (content === "" && !hasFiles) {
                 alert("Cannot publish an empty memory.");
                 return;
             }
@@ -5355,19 +5400,42 @@
                 visibility: "live"
             };
 
-            if (fileInput.files.length > 0) {
+            const pendingPost = addPendingPostToCache(newPostData);
+            const clearAndRender = () => {
+                clearWritingDesk();
+                setPostsLoadState('ready', '', null);
+                renderStream();
+            };
+
+            const publishToFirebase = (payload) => {
+                try {
+                    if (database && typeof database.ref === 'function') {
+                        const newRef = database.ref('posts').push();
+                        newRef.set(payload).then(() => {
+                            clearAndRender();
+                        }).catch((err) => {
+                            console.warn('Could not sync new post to Firebase:', err);
+                            clearAndRender();
+                        });
+                    } else {
+                        clearAndRender();
+                    }
+                } catch (err) {
+                    console.warn('Publish failed:', err);
+                    clearAndRender();
+                }
+            };
+
+            if (hasFiles) {
                 const reader = new FileReader();
                 reader.onload = function(e) {
                     newPostData.media = e.target.result;
                     newPostData.mediaType = fileInput.files[0].type.startsWith('video') ? 'video' : 'image';
-                    
-                    database.ref('posts').push(newPostData);
-                    clearWritingDesk();
+                    publishToFirebase(newPostData);
                 };
                 reader.readAsDataURL(fileInput.files[0]);
             } else {
-                database.ref('posts').push(newPostData);
-                clearWritingDesk();
+                publishToFirebase(newPostData);
             }
         }
 
