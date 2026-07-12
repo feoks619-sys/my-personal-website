@@ -2240,6 +2240,53 @@
             return pendingPost;
         }
 
+        function findPostInCache(postKey) {
+            const targetKey = String(postKey || '').trim();
+            return globalPostsCache.find((post) => {
+                const entryKey = String(post && post.fbKey ? post.fbKey : '').trim();
+                const entryId = String(post && post.id ? post.id : '').trim();
+                return entryKey === targetKey || entryId === targetKey || (entryKey.startsWith('local-') && targetKey.startsWith('local-') && entryKey === targetKey);
+            }) || null;
+        }
+
+        function updatePostInCache(postKey, updates) {
+            const target = findPostInCache(postKey);
+            if (!target) {
+                const newPost = { fbKey: String(postKey || '').trim(), ...updates };
+                globalPostsCache = mergePostsLists(globalPostsCache, [newPost]);
+                saveCachedPosts(globalPostsCache);
+                renderStream();
+                return newPost;
+            }
+
+            const updatedPost = { ...target, ...updates, fbKey: updates.fbKey || target.fbKey || String(postKey || '').trim() };
+            const index = globalPostsCache.findIndex((post) => {
+                const entryKey = String(post && post.fbKey ? post.fbKey : '').trim();
+                const entryId = String(post && post.id ? post.id : '').trim();
+                const targetKey = String(postKey || '').trim();
+                return entryKey === targetKey || entryId === targetKey || (entryKey.startsWith('local-') && targetKey.startsWith('local-') && entryKey === targetKey);
+            });
+            if (index >= 0) {
+                globalPostsCache[index] = updatedPost;
+            } else {
+                globalPostsCache = mergePostsLists(globalPostsCache, [updatedPost]);
+            }
+            saveCachedPosts(globalPostsCache);
+            renderStream();
+            return updatedPost;
+        }
+
+        function removePostFromCache(postKey) {
+            const targetKey = String(postKey || '').trim();
+            globalPostsCache = (globalPostsCache || []).filter((post) => {
+                const entryKey = String(post && post.fbKey ? post.fbKey : '').trim();
+                const entryId = String(post && post.id ? post.id : '').trim();
+                return entryKey !== targetKey && entryId !== targetKey;
+            });
+            saveCachedPosts(globalPostsCache);
+            renderStream();
+        }
+
         function setPostsLoadState(status, message = '', error = null) {
             postsLoadStatus = status;
             postsLoadMessage = message;
@@ -5411,7 +5458,18 @@
                 try {
                     if (database && typeof database.ref === 'function') {
                         const newRef = database.ref('posts').push();
-                        newRef.set(payload).then(() => {
+                        const firebasePayload = {
+                            ...payload,
+                            fbKey: newRef.key,
+                            pending: false,
+                            id: payload.id || Date.now()
+                        };
+                        newRef.set(firebasePayload).then(() => {
+                            updatePostInCache(pendingPost.fbKey, {
+                                ...firebasePayload,
+                                fbKey: newRef.key,
+                                pending: false
+                            });
                             clearAndRender();
                         }).catch((err) => {
                             console.warn('Could not sync new post to Firebase:', err);
@@ -5478,20 +5536,36 @@
 
         function archivePost(key, event) {
             event.stopPropagation();
-            database.ref('posts/' + key).update({ visibility: "closet" });
+            const normalizedKey = String(key || '').trim();
+            updatePostInCache(normalizedKey, { visibility: 'closet' });
+            if (database && database.ref) {
+                const targetKey = (findPostInCache(normalizedKey) && findPostInCache(normalizedKey).fbKey) ? findPostInCache(normalizedKey).fbKey : normalizedKey;
+                database.ref('posts/' + targetKey).update({ visibility: 'closet' }).catch((err) => {
+                    console.warn('Could not archive post:', err);
+                });
+            }
         }
 
         function restorePost(key, event) {
             event.stopPropagation();
-            database.ref('posts/' + key).update({ visibility: "live" });
+            const normalizedKey = String(key || '').trim();
+            updatePostInCache(normalizedKey, { visibility: 'live' });
+            if (database && database.ref) {
+                const targetKey = (findPostInCache(normalizedKey) && findPostInCache(normalizedKey).fbKey) ? findPostInCache(normalizedKey).fbKey : normalizedKey;
+                database.ref('posts/' + targetKey).update({ visibility: 'live' }).catch((err) => {
+                    console.warn('Could not restore post:', err);
+                });
+            }
         }
 
         function editPost(key, event) {
             if (event) event.stopPropagation();
             if (!isAdminLoggedIn) return;
 
-            const post = globalPostsCache.find(item => item.fbKey === key);
-            editingPostKey = key;
+            const normalizedKey = String(key || '').trim();
+            const post = findPostInCache(normalizedKey);
+            const targetKey = post && post.fbKey ? post.fbKey : normalizedKey;
+            editingPostKey = targetKey;
             editingPostDraft = (post && post.text) ? post.text : "";
             renderStream();
         }
@@ -5511,24 +5585,47 @@
                 return;
             }
 
-            database.ref('posts/' + key).update({ text: trimmedText }).then(() => {
-                editingPostKey = null;
-                editingPostDraft = "";
-                renderStream();
-            });
+            const normalizedKey = String(key || '').trim();
+            const targetPost = findPostInCache(normalizedKey);
+            const targetKey = targetPost && targetPost.fbKey ? targetPost.fbKey : normalizedKey;
+            updatePostInCache(targetKey, { text: trimmedText, fbKey: targetKey });
+            editingPostKey = null;
+            editingPostDraft = "";
+            renderStream();
+            if (database && database.ref) {
+                database.ref('posts/' + targetKey).update({ text: trimmedText }).catch((err) => {
+                    console.warn('Could not save edited post:', err);
+                });
+            }
         }
 
         function deletePost(key, event) {
             if (event) event.stopPropagation();
             if (!isAdminLoggedIn) return;
             if (!confirm("Remove this post from the feed without archiving it?")) return;
-            database.ref('posts/' + key).update({ visibility: "deleted" });
+            const normalizedKey = String(key || '').trim();
+            const targetPost = findPostInCache(normalizedKey);
+            const targetKey = targetPost && targetPost.fbKey ? targetPost.fbKey : normalizedKey;
+            updatePostInCache(targetKey, { visibility: 'deleted', fbKey: targetKey });
+            if (database && database.ref) {
+                database.ref('posts/' + targetKey).update({ visibility: 'deleted' }).catch((err) => {
+                    console.warn('Could not delete post:', err);
+                });
+            }
         }
 
         function burnPostImmediate(key, event) {
             event.stopPropagation();
             if(confirm("Are you absolutely sure you want to completely erase this memory fragment from existence?")) {
-                database.ref('posts/' + key).remove();
+                const normalizedKey = String(key || '').trim();
+                const targetPost = findPostInCache(normalizedKey);
+                const targetKey = targetPost && targetPost.fbKey ? targetPost.fbKey : normalizedKey;
+                removePostFromCache(targetKey);
+                if (database && database.ref) {
+                    database.ref('posts/' + targetKey).remove().catch((err) => {
+                        console.warn('Could not burn post:', err);
+                    });
+                }
             }
         }
 
