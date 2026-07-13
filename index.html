@@ -3379,6 +3379,20 @@
             return Object.values(merged).sort((a, b) => (b.messages[b.messages.length - 1]?.timestamp || 0) - (a.messages[a.messages.length - 1]?.timestamp || 0));
         }
 
+        function persistDmInboxConversations(conversations) {
+            try {
+                const conversationMap = {};
+                (conversations || []).forEach((conversation) => {
+                    const key = normalizeDmConversationKey(conversation && conversation.key);
+                    if (!key) return;
+                    conversationMap[key] = Array.isArray(conversation.messages) ? conversation.messages : [];
+                });
+                saveStoredDmConversations(conversationMap);
+            } catch (err) {
+                console.warn('Could not persist DM inbox conversations:', err);
+            }
+        }
+
         async function fetchDirectMessagesFromApi(conversationKey) {
             try {
                 const query = conversationKey ? '?conversation=' + encodeURIComponent(conversationKey) : '';
@@ -4726,8 +4740,12 @@
                     const data = snapshot.val() || {};
                     const remoteConversations = buildDmConversationViewsFromRawConversations(data);
                     const localConversations = getStoredDmConversationViews();
-                    const mergedConversations = mergeDmInboxConversations(localConversations, remoteConversations);
+                    const preservedConversations = (dmInboxConversations && dmInboxConversations.length > 0)
+                        ? dmInboxConversations
+                        : localConversations;
+                    const mergedConversations = mergeDmInboxConversations(preservedConversations, remoteConversations);
                     dmInboxConversations = mergedConversations;
+                    persistDmInboxConversations(mergedConversations);
                     renderDmInbox(mergedConversations);
                 };
                 database.ref('direct_messages').on('value', adminDmInboxListener);
@@ -4849,9 +4867,12 @@
 
         function loadAdminDmInbox() {
             const localConversations = getStoredDmConversationViews();
-            if (localConversations.length > 0) {
-                dmInboxConversations = localConversations;
-                renderDmInbox(localConversations);
+            const preservedConversations = (dmInboxConversations && dmInboxConversations.length > 0)
+                ? dmInboxConversations
+                : localConversations;
+            if (preservedConversations.length > 0) {
+                dmInboxConversations = preservedConversations;
+                renderDmInbox(preservedConversations);
             } else {
                 dmInboxConversations = [];
                 renderDmInbox([]);
@@ -4876,13 +4897,16 @@
                     sourceConversations.push(...firebaseResult.value);
                 }
 
-                const mergedConversations = mergeDmInboxConversations(localConversations, sourceConversations);
+                const mergedConversations = mergeDmInboxConversations(preservedConversations, sourceConversations);
                 dmInboxConversations = mergedConversations;
+                persistDmInboxConversations(mergedConversations);
                 renderDmInbox(mergedConversations);
             }).catch(err => {
                 console.warn('Could not load admin DM inbox from available sources:', err);
-                dmInboxConversations = mergeDmInboxConversations(localConversations, []);
-                renderDmInbox(dmInboxConversations);
+                const mergedConversations = mergeDmInboxConversations(preservedConversations, []);
+                dmInboxConversations = mergedConversations;
+                persistDmInboxConversations(mergedConversations);
+                renderDmInbox(mergedConversations);
             });
         }
 
