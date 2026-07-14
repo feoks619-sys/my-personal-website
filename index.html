@@ -4839,6 +4839,31 @@
             panel.setAttribute('aria-hidden', String(!open));
             if (open) {
                 loadAdminDmInbox();
+                startAdminDmAutoRefresh();
+            } else {
+                stopAdminDmAutoRefresh();
+                detachAdminDmInboxListener();
+            }
+        }
+
+        function processAdminDmSnapshot(snapshot) {
+            try {
+                const data = snapshot && snapshot.val ? (snapshot.val() || {}) : (snapshot || {});
+                const remoteConversations = buildDmConversationViewsFromRawConversations(data);
+                const localConversations = getStoredDmConversationViews();
+                const fallbackConversations = buildDmConversationFallbackFromPosts(globalPostsCache.length > 0 ? globalPostsCache : getCachedPosts());
+                const preservedConversations = (dmInboxConversations && dmInboxConversations.length > 0)
+                    ? dmInboxConversations
+                    : localConversations;
+                const mergedConversations = mergeDmInboxConversations(
+                    mergeDmInboxConversations(preservedConversations, fallbackConversations),
+                    remoteConversations
+                );
+                dmInboxConversations = mergedConversations;
+                persistDmInboxConversations(mergedConversations);
+                renderDmInbox(mergedConversations);
+            } catch (e) {
+                console.warn('Error processing admin DM snapshot:', e);
             }
         }
 
@@ -4849,31 +4874,10 @@
                     database.ref('direct_messages').off('value', adminDmInboxListener);
                     adminDmInboxListener = null;
                 }
-                const processAdminDmSnapshot = (snapshot) => {
-                    try {
-                        const data = snapshot && snapshot.val ? (snapshot.val() || {}) : (snapshot || {});
-                        const remoteConversations = buildDmConversationViewsFromRawConversations(data);
-                        const localConversations = getStoredDmConversationViews();
-                        const fallbackConversations = buildDmConversationFallbackFromPosts(globalPostsCache.length > 0 ? globalPostsCache : getCachedPosts());
-                        const preservedConversations = (dmInboxConversations && dmInboxConversations.length > 0)
-                            ? dmInboxConversations
-                            : localConversations;
-                        const mergedConversations = mergeDmInboxConversations(
-                            mergeDmInboxConversations(preservedConversations, fallbackConversations),
-                            remoteConversations
-                        );
-                        dmInboxConversations = mergedConversations;
-                        persistDmInboxConversations(mergedConversations);
-                        renderDmInbox(mergedConversations);
-                    } catch (e) {
-                        console.warn('Error processing admin DM snapshot:', e);
-                    }
-                };
-
                 adminDmInboxListener = (snapshot) => processAdminDmSnapshot(snapshot);
                 database.ref('direct_messages').on('value', adminDmInboxListener);
 
-                // Poll as a fallback in case the realtime listener stalls (happens under some Firebase error states)
+                // Poll as a fallback in case the realtime listener stalls
                 try {
                     if (adminDmPollIntervalId) clearInterval(adminDmPollIntervalId);
                     adminDmPollIntervalId = setInterval(() => {
@@ -4901,6 +4905,54 @@
                     adminDmPollIntervalId = null;
                 }
             } catch (e) {}
+        }
+
+        function stopAdminDmAutoRefresh() {
+            try {
+                if (adminDmRefreshIntervalId) {
+                    clearInterval(adminDmRefreshIntervalId);
+                    adminDmRefreshIntervalId = null;
+                }
+            } catch (e) {}
+        }
+
+        function startAdminDmAutoRefresh() {
+            stopAdminDmAutoRefresh();
+            try {
+                adminDmRefreshIntervalId = setInterval(() => {
+                    if (!adminDmSidebarVisible) {
+                        stopAdminDmAutoRefresh();
+                        return;
+                    }
+                    loadAdminDmInbox();
+                }, 5000);
+            } catch (e) {
+                console.warn('Could not start admin DM auto refresh:', e);
+            }
+        }
+
+        function stopAdminDmAutoRefresh() {
+            try {
+                if (adminDmRefreshIntervalId) {
+                    clearInterval(adminDmRefreshIntervalId);
+                    adminDmRefreshIntervalId = null;
+                }
+            } catch (e) {}
+        }
+
+        function startAdminDmAutoRefresh() {
+            stopAdminDmAutoRefresh();
+            try {
+                adminDmRefreshIntervalId = setInterval(() => {
+                    if (!adminDmSidebarVisible) {
+                        stopAdminDmAutoRefresh();
+                        return;
+                    }
+                    loadAdminDmInbox(true);
+                }, 5000);
+            } catch (e) {
+                console.warn('Could not start admin DM auto refresh:', e);
+            }
         }
 
         async function sendAdminDmReply() {
@@ -5042,16 +5094,10 @@
                 renderDmInbox([]);
             }
 
+            detachAdminDmInboxListener();
             attachAdminDmInboxListener();
 
-            // Ensure poll is cleared/started when loading inbox
-            try {
-                if (adminDmPollIntervalId) {
-                    clearInterval(adminDmPollIntervalId);
-                    adminDmPollIntervalId = null;
-                }
-            } catch (e) {}
-
+            // The poll fallback is managed by attachAdminDmInboxListener.
             Promise.allSettled([
                 fetchDirectMessagesFromApi().then((apiRaw) => {
                     return buildDmConversationViewsFromRawConversations(normalizeApiDmResponse(apiRaw));
