@@ -4934,6 +4934,28 @@
             });
         }
 
+        function readRegisteredSoulsFallback() {
+            try {
+                const raw = localStorage.getItem('archive_registered_souls');
+                if (!raw) return {};
+                const parsed = JSON.parse(raw);
+                if (parsed && typeof parsed === 'object') {
+                    return parsed;
+                }
+            } catch (err) {
+                console.warn('Could not read archived registered souls:', err);
+            }
+            return {};
+        }
+
+        function persistRegisteredSoulsFallback(users) {
+            try {
+                localStorage.setItem('archive_registered_souls', JSON.stringify(users || {}));
+            } catch (err) {
+                console.warn('Could not persist archived registered souls:', err);
+            }
+        }
+
         function loadAdminTrashData() {
             const commentsList = document.getElementById('trash-comments-list');
             const likesList = document.getElementById('trash-likes-list');
@@ -5011,11 +5033,12 @@
 
             // Users (current + cleared)
             Promise.all([
-                firebaseCallWithTimeout(database.ref('registered_souls'), 3000),
-                firebaseCallWithTimeout(database.ref('trash/clearedUsers'), 3000)
+                firebaseCallWithTimeout(database.ref('registered_souls'), 3000).catch(() => null),
+                firebaseCallWithTimeout(database.ref('trash/clearedUsers'), 3000).catch(() => null)
             ]).then(([currentSnap, clearSnapshot]) => {
-                const currentUsers = currentSnap.val() || {};
-                const cleared = clearSnapshot.val() || {};
+                const currentUsers = (currentSnap && currentSnap.val) ? (currentSnap.val() || {}) : readRegisteredSoulsFallback();
+                const cleared = (clearSnapshot && clearSnapshot.val) ? (clearSnapshot.val() || {}) : {};
+                persistRegisteredSoulsFallback(currentUsers);
                 const pendingUsers = getPendingTrashItems('users');
                 const currentItems = Object.keys(currentUsers).sort();
                 const clearedItems = Object.values(cleared).concat(pendingUsers)
@@ -5044,12 +5067,21 @@
                     usersList.innerHTML = rows.join('');
                 }
             }).catch(() => {
+                const fallbackUsers = readRegisteredSoulsFallback();
                 const pendingUsers = getPendingTrashItems('users');
-                if (pendingUsers.length === 0) {
+                const currentItems = Object.keys(fallbackUsers).sort();
+                const rows = [];
+                currentItems.forEach(tag => {
+                    rows.push(`<div class="trash-item"><strong>${tag}</strong> • active</div>`);
+                });
+                if (pendingUsers.length > 0) {
+                    pendingUsers.sort((a, b) => (b.clearedAt || 0) - (a.clearedAt || 0)).slice(0, 10).forEach(item => {
+                        rows.push(`<div class="trash-item"><strong>${item.tag}</strong> • cleared ${item.clearedAtText || ''}</div>`);
+                    });
+                }
+                if (rows.length === 0) {
                     usersList.innerHTML = '<div class="trash-item">No users found.</div>';
                 } else {
-                    const rows = pendingUsers.sort((a, b) => (b.clearedAt || 0) - (a.clearedAt || 0)).slice(0, 10)
-                        .map(item => `<div class="trash-item"><strong>${item.tag}</strong> • cleared ${item.clearedAtText || ''}</div>`);
                     usersList.innerHTML = rows.join('');
                 }
             });
@@ -5317,11 +5349,15 @@
             // Users section
             firebaseCallWithTimeout(database.ref('registered_souls'), 3000).then(snapshot => {
                 const users = snapshot.val() || {};
+                persistRegisteredSoulsFallback(users);
                 const keys = Object.keys(users).sort();
                 if (keys.length === 0) usersList.innerHTML = '<div class="trash-item">No users registered.</div>';
                 else usersList.innerHTML = keys.slice(0,50).map(u=>`<div class="trash-item"><strong>${u}</strong></div>`).join('');
             }).catch(() => {
-                usersList.innerHTML = '<div class="trash-item">No users registered.</div>';
+                const fallbackUsers = readRegisteredSoulsFallback();
+                const keys = Object.keys(fallbackUsers).sort();
+                if (keys.length === 0) usersList.innerHTML = '<div class="trash-item">No users registered.</div>';
+                else usersList.innerHTML = keys.slice(0,50).map(u=>`<div class="trash-item"><strong>${u}</strong></div>`).join('');
             });
         }
 
