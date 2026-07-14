@@ -2649,9 +2649,11 @@
         function canManageDmMessage(message) {
             if (!message || message.deleted) return false;
             if (isAdminLoggedIn) {
-                return true;
+                return message.from === 'admin';
             }
-            return message.from === 'user';
+            const activeKey = normalizeDmConversationKey(claimedSoulTag || localStorage.getItem('archive_soul_tag'));
+            const messageOwnerKey = normalizeDmConversationKey(message.userTag || message.user || message.from || '');
+            return message.from === 'user' && messageOwnerKey === activeKey;
         }
 
         function handleDmInlineAction(event) {
