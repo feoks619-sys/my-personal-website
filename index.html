@@ -3238,6 +3238,25 @@
             return result;
         }
 
+        function isLikelyDmMessage(value) {
+            if (!value || typeof value !== 'object') return false;
+            if (Array.isArray(value)) return value.some(item => isLikelyDmMessage(item));
+            return Boolean(
+                value.text || value.message || value.content || value.mediaUrl || value.mediaType ||
+                value.timestamp || value.from || value.userTag || value.user || value.displayName || value.fbKey || value.id
+            );
+        }
+
+        function isLikelyDmConversation(value) {
+            if (!value || typeof value !== 'object') return false;
+            if (Array.isArray(value)) return value.some(item => isLikelyDmMessage(item));
+            return Boolean(
+                value.messages || value.conversationKey || value.key || value.userTag ||
+                value.conversations || value.directMessages ||
+                Object.keys(value).some(key => isLikelyDmMessage(value[key]))
+            );
+        }
+
         function collectDmStorageCandidates() {
             const candidates = [];
             try {
@@ -3246,17 +3265,22 @@
                     const raw = localStorage.getItem(storageKey);
                     if (!raw) return;
                     try {
-                        candidates.push(JSON.parse(raw));
+                        const parsed = JSON.parse(raw);
+                        if (parsed && (isLikelyDmConversation(parsed) || isLikelyDmMessage(parsed))) {
+                            candidates.push(parsed);
+                        }
                     } catch (err) {
                         // ignore non-JSON entries
                     }
                 });
                 Object.keys(localStorage).forEach((storageKey) => {
-                    if (!/(dm|direct|whisper|conversation|message)/i.test(storageKey)) return;
                     const raw = localStorage.getItem(storageKey);
                     if (!raw) return;
                     try {
-                        candidates.push(JSON.parse(raw));
+                        const parsed = JSON.parse(raw);
+                        if (parsed && (isLikelyDmConversation(parsed) || isLikelyDmMessage(parsed))) {
+                            candidates.push(parsed);
+                        }
                     } catch (err) {
                         // ignore non-JSON entries
                     }
