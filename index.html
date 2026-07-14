@@ -2155,6 +2155,7 @@
         let selectedDmKey = null;
         let directMessagesCache = [];
         let adminDmInboxListener = null;
+        let adminDmPollIntervalId = null;
         let dmEditState = { conversationKey: null, messageKey: null, draft: '' };
         let dmOverlayVisible = false;
         let adminDmSidebarVisible = false;
@@ -4848,26 +4849,58 @@
                     database.ref('direct_messages').off('value', adminDmInboxListener);
                     adminDmInboxListener = null;
                 }
-                adminDmInboxListener = (snapshot) => {
-                    const data = snapshot.val() || {};
-                    const remoteConversations = buildDmConversationViewsFromRawConversations(data);
-                    const localConversations = getStoredDmConversationViews();
-                    const fallbackConversations = buildDmConversationFallbackFromPosts(globalPostsCache.length > 0 ? globalPostsCache : getCachedPosts());
-                    const preservedConversations = (dmInboxConversations && dmInboxConversations.length > 0)
-                        ? dmInboxConversations
-                        : localConversations;
-                    const mergedConversations = mergeDmInboxConversations(
-                        mergeDmInboxConversations(preservedConversations, fallbackConversations),
-                        remoteConversations
-                    );
-                    dmInboxConversations = mergedConversations;
-                    persistDmInboxConversations(mergedConversations);
-                    renderDmInbox(mergedConversations);
+                const processAdminDmSnapshot = (snapshot) => {
+                    try {
+                        const data = snapshot && snapshot.val ? (snapshot.val() || {}) : (snapshot || {});
+                        const remoteConversations = buildDmConversationViewsFromRawConversations(data);
+                        const localConversations = getStoredDmConversationViews();
+                        const fallbackConversations = buildDmConversationFallbackFromPosts(globalPostsCache.length > 0 ? globalPostsCache : getCachedPosts());
+                        const preservedConversations = (dmInboxConversations && dmInboxConversations.length > 0)
+                            ? dmInboxConversations
+                            : localConversations;
+                        const mergedConversations = mergeDmInboxConversations(
+                            mergeDmInboxConversations(preservedConversations, fallbackConversations),
+                            remoteConversations
+                        );
+                        dmInboxConversations = mergedConversations;
+                        persistDmInboxConversations(mergedConversations);
+                        renderDmInbox(mergedConversations);
+                    } catch (e) {
+                        console.warn('Error processing admin DM snapshot:', e);
+                    }
                 };
+
+                adminDmInboxListener = (snapshot) => processAdminDmSnapshot(snapshot);
                 database.ref('direct_messages').on('value', adminDmInboxListener);
+
+                // Poll as a fallback in case the realtime listener stalls (happens under some Firebase error states)
+                try {
+                    if (adminDmPollIntervalId) clearInterval(adminDmPollIntervalId);
+                    adminDmPollIntervalId = setInterval(() => {
+                        database.ref('direct_messages').once('value').then(snap => processAdminDmSnapshot(snap)).catch(() => {});
+                    }, 5000);
+                } catch (pollErr) {
+                    console.warn('Could not start admin DM poll fallback:', pollErr);
+                }
             } catch (err) {
                 console.warn('Could not attach admin DM inbox listener:', err);
             }
+        }
+
+        // When detaching listeners, ensure polling fallback is stopped
+        function detachAdminDmInboxListener() {
+            try {
+                if (adminDmInboxListener && database && database.ref) {
+                    database.ref('direct_messages').off('value', adminDmInboxListener);
+                }
+            } catch (e) {}
+            adminDmInboxListener = null;
+            try {
+                if (adminDmPollIntervalId) {
+                    clearInterval(adminDmPollIntervalId);
+                    adminDmPollIntervalId = null;
+                }
+            } catch (e) {}
         }
 
         async function sendAdminDmReply() {
@@ -5010,6 +5043,14 @@
             }
 
             attachAdminDmInboxListener();
+
+            // Ensure poll is cleared/started when loading inbox
+            try {
+                if (adminDmPollIntervalId) {
+                    clearInterval(adminDmPollIntervalId);
+                    adminDmPollIntervalId = null;
+                }
+            } catch (e) {}
 
             Promise.allSettled([
                 fetchDirectMessagesFromApi().then((apiRaw) => {
