@@ -2197,6 +2197,58 @@
             }
         }
 
+        function buildRegisteredUsersFallbackFromPosts(posts) {
+            const discovered = {};
+            const addTag = (tag, fingerprint) => {
+                const normalizedTag = String(tag || '').trim();
+                if (!normalizedTag) return;
+                const normalizedKey = normalizedTag.toLowerCase();
+                if (!discovered[normalizedKey]) {
+                    discovered[normalizedKey] = fingerprint || normalizedTag;
+                }
+            };
+
+            (posts || []).forEach((post) => {
+                if (post && post.voterRegistry && typeof post.voterRegistry === 'object') {
+                    Object.keys(post.voterRegistry).forEach((key) => {
+                        const entry = post.voterRegistry[key];
+                        if (entry && typeof entry === 'object') {
+                            if (entry.tag) addTag(entry.tag, entry.fingerprint || key);
+                        } else if (typeof entry === 'string') {
+                            addTag(entry, key);
+                        }
+                    });
+                }
+
+                if (post && post.whispers && typeof post.whispers === 'object') {
+                    Object.keys(post.whispers).forEach((whisperKey) => {
+                        const whisper = post.whispers[whisperKey] || {};
+                        const rawTag = whisper.user;
+                        const normalizedTag = String(rawTag || '').trim();
+                        if (!normalizedTag) return;
+                        const lowerTag = normalizedTag.toLowerCase();
+                        if (lowerTag === 'admin' || lowerTag === 'anonymous soul') return;
+                        addTag(normalizedTag, normalizedTag);
+                    });
+                }
+            });
+
+            return discovered;
+        }
+
+        function hydrateRegisteredSoulsFallback(posts = null) {
+            const existingUsers = readRegisteredSoulsFallback();
+            const discoveredUsers = buildRegisteredUsersFallbackFromPosts(Array.isArray(posts) ? posts : (globalPostsCache || getCachedPosts()));
+            const mergedUsers = { ...existingUsers };
+            Object.keys(discoveredUsers).forEach((key) => {
+                if (!mergedUsers[key]) {
+                    mergedUsers[key] = discoveredUsers[key];
+                }
+            });
+            persistRegisteredSoulsFallback(mergedUsers);
+            return mergedUsers;
+        }
+
         function mergePostsLists(existingPosts, incomingPosts) {
             const normalizedExisting = Array.isArray(existingPosts) ? existingPosts : [];
             const normalizedIncoming = Array.isArray(incomingPosts) ? incomingPosts : [];
@@ -2305,6 +2357,7 @@
                 : normalized;
 
             globalPostsCache = mergedPosts;
+            hydrateRegisteredSoulsFallback(mergedPosts);
             if (source === 'listener') {
                 listenerSeenData = true;
             }
@@ -3365,6 +3418,41 @@
         function getStoredDmConversationViews() {
             const conversations = getStoredDmConversations();
             return Object.keys(conversations).map(key => buildDmConversationPreview(key, conversations[key] || [])).sort((a, b) => (b.messages[b.messages.length - 1]?.timestamp || 0) - (a.messages[a.messages.length - 1]?.timestamp || 0));
+        }
+
+        function buildDmConversationFallbackFromPosts(posts) {
+            const grouped = {};
+
+            (posts || []).forEach((post) => {
+                const whispers = post && post.whispers && typeof post.whispers === 'object' ? post.whispers : {};
+                Object.keys(whispers).forEach((whisperKey) => {
+                    const whisper = whispers[whisperKey] || {};
+                    const rawTag = whisper.user;
+                    const normalizedTag = String(rawTag || '').trim();
+                    if (!normalizedTag) return;
+                    const lowerTag = normalizedTag.toLowerCase();
+                    if (lowerTag === 'admin' || lowerTag === 'anonymous soul') return;
+
+                    const conversationKey = normalizeDmConversationKey(normalizedTag);
+                    if (!conversationKey) return;
+
+                    const message = {
+                        fbKey: `${post.fbKey || 'post'}-${whisperKey}`,
+                        from: 'user',
+                        userTag: normalizedTag,
+                        text: whisper.text || '',
+                        timestamp: whisper.timestamp || post.id || Date.now()
+                    };
+
+                    if (!grouped[conversationKey]) grouped[conversationKey] = [];
+                    grouped[conversationKey].push(message);
+                });
+            });
+
+            return Object.keys(grouped).map((key) => {
+                const messages = grouped[key].slice().sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+                return buildDmConversationPreview(key, messages);
+            });
         }
 
         function normalizeApiDmResponse(data) {
@@ -4764,10 +4852,14 @@
                     const data = snapshot.val() || {};
                     const remoteConversations = buildDmConversationViewsFromRawConversations(data);
                     const localConversations = getStoredDmConversationViews();
+                    const fallbackConversations = buildDmConversationFallbackFromPosts(globalPostsCache.length > 0 ? globalPostsCache : getCachedPosts());
                     const preservedConversations = (dmInboxConversations && dmInboxConversations.length > 0)
                         ? dmInboxConversations
                         : localConversations;
-                    const mergedConversations = mergeDmInboxConversations(preservedConversations, remoteConversations);
+                    const mergedConversations = mergeDmInboxConversations(
+                        mergeDmInboxConversations(preservedConversations, fallbackConversations),
+                        remoteConversations
+                    );
                     dmInboxConversations = mergedConversations;
                     persistDmInboxConversations(mergedConversations);
                     renderDmInbox(mergedConversations);
@@ -4891,12 +4983,14 @@
 
         function loadAdminDmInbox() {
             const localConversations = getStoredDmConversationViews();
+            const fallbackConversations = buildDmConversationFallbackFromPosts(globalPostsCache.length > 0 ? globalPostsCache : getCachedPosts());
             const preservedConversations = (dmInboxConversations && dmInboxConversations.length > 0)
                 ? dmInboxConversations
                 : localConversations;
-            if (preservedConversations.length > 0) {
-                dmInboxConversations = preservedConversations;
-                renderDmInbox(preservedConversations);
+            const baseConversations = mergeDmInboxConversations(preservedConversations, fallbackConversations);
+            if (baseConversations.length > 0) {
+                dmInboxConversations = baseConversations;
+                renderDmInbox(baseConversations);
             } else {
                 dmInboxConversations = [];
                 renderDmInbox([]);
@@ -4921,13 +5015,13 @@
                     sourceConversations.push(...firebaseResult.value);
                 }
 
-                const mergedConversations = mergeDmInboxConversations(preservedConversations, sourceConversations);
+                const mergedConversations = mergeDmInboxConversations(baseConversations, sourceConversations);
                 dmInboxConversations = mergedConversations;
                 persistDmInboxConversations(mergedConversations);
                 renderDmInbox(mergedConversations);
             }).catch(err => {
                 console.warn('Could not load admin DM inbox from available sources:', err);
-                const mergedConversations = mergeDmInboxConversations(preservedConversations, []);
+                const mergedConversations = mergeDmInboxConversations(baseConversations, []);
                 dmInboxConversations = mergedConversations;
                 persistDmInboxConversations(mergedConversations);
                 renderDmInbox(mergedConversations);
@@ -5349,12 +5443,13 @@
             // Users section
             firebaseCallWithTimeout(database.ref('registered_souls'), 3000).then(snapshot => {
                 const users = snapshot.val() || {};
-                persistRegisteredSoulsFallback(users);
-                const keys = Object.keys(users).sort();
+                const mergedUsers = { ...users, ...hydrateRegisteredSoulsFallback(globalPostsCache.length > 0 ? globalPostsCache : getCachedPosts()) };
+                persistRegisteredSoulsFallback(mergedUsers);
+                const keys = Object.keys(mergedUsers).sort();
                 if (keys.length === 0) usersList.innerHTML = '<div class="trash-item">No users registered.</div>';
                 else usersList.innerHTML = keys.slice(0,50).map(u=>`<div class="trash-item"><strong>${u}</strong></div>`).join('');
             }).catch(() => {
-                const fallbackUsers = readRegisteredSoulsFallback();
+                const fallbackUsers = hydrateRegisteredSoulsFallback(globalPostsCache.length > 0 ? globalPostsCache : getCachedPosts());
                 const keys = Object.keys(fallbackUsers).sort();
                 if (keys.length === 0) usersList.innerHTML = '<div class="trash-item">No users registered.</div>';
                 else usersList.innerHTML = keys.slice(0,50).map(u=>`<div class="trash-item"><strong>${u}</strong></div>`).join('');
