@@ -4852,11 +4852,8 @@
                 const remoteConversations = buildDmConversationViewsFromRawConversations(data);
                 const localConversations = getStoredDmConversationViews();
                 const fallbackConversations = buildDmConversationFallbackFromPosts(globalPostsCache.length > 0 ? globalPostsCache : getCachedPosts());
-                const preservedConversations = (dmInboxConversations && dmInboxConversations.length > 0)
-                    ? dmInboxConversations
-                    : localConversations;
                 const mergedConversations = mergeDmInboxConversations(
-                    mergeDmInboxConversations(preservedConversations, fallbackConversations),
+                    mergeDmInboxConversations(localConversations, fallbackConversations),
                     remoteConversations
                 );
                 dmInboxConversations = mergedConversations;
@@ -5082,22 +5079,14 @@
         function loadAdminDmInbox() {
             const localConversations = getStoredDmConversationViews();
             const fallbackConversations = buildDmConversationFallbackFromPosts(globalPostsCache.length > 0 ? globalPostsCache : getCachedPosts());
-            const preservedConversations = (dmInboxConversations && dmInboxConversations.length > 0)
-                ? dmInboxConversations
-                : localConversations;
-            const baseConversations = mergeDmInboxConversations(preservedConversations, fallbackConversations);
-            if (baseConversations.length > 0) {
-                dmInboxConversations = baseConversations;
-                renderDmInbox(baseConversations);
-            } else {
-                dmInboxConversations = [];
-                renderDmInbox([]);
-            }
+            const previewConversations = mergeDmInboxConversations(localConversations, fallbackConversations);
+            dmInboxConversations = previewConversations;
+            renderDmInbox(previewConversations);
 
             detachAdminDmInboxListener();
             attachAdminDmInboxListener();
 
-            // The poll fallback is managed by attachAdminDmInboxListener.
+            // Load the latest remote data and merge it with local/fallback state.
             Promise.allSettled([
                 fetchDirectMessagesFromApi().then((apiRaw) => {
                     return buildDmConversationViewsFromRawConversations(normalizeApiDmResponse(apiRaw));
@@ -5108,23 +5097,22 @@
                 })
             ]).then(([apiResult, firebaseResult]) => {
                 const sourceConversations = [];
-                if (apiResult.status === 'fulfilled' && Array.isArray(apiResult.value)) {
-                    sourceConversations.push(...apiResult.value);
-                }
                 if (firebaseResult.status === 'fulfilled' && Array.isArray(firebaseResult.value)) {
                     sourceConversations.push(...firebaseResult.value);
                 }
+                if (apiResult.status === 'fulfilled' && Array.isArray(apiResult.value)) {
+                    sourceConversations.push(...apiResult.value);
+                }
 
-                const mergedConversations = mergeDmInboxConversations(baseConversations, sourceConversations);
+                const mergedConversations = mergeDmInboxConversations(previewConversations, sourceConversations);
                 dmInboxConversations = mergedConversations;
                 persistDmInboxConversations(mergedConversations);
                 renderDmInbox(mergedConversations);
             }).catch(err => {
                 console.warn('Could not load admin DM inbox from available sources:', err);
-                const mergedConversations = mergeDmInboxConversations(baseConversations, []);
-                dmInboxConversations = mergedConversations;
-                persistDmInboxConversations(mergedConversations);
-                renderDmInbox(mergedConversations);
+                dmInboxConversations = previewConversations;
+                persistDmInboxConversations(previewConversations);
+                renderDmInbox(previewConversations);
             });
         }
 
