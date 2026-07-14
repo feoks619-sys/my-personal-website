@@ -2569,7 +2569,23 @@
                 renderDirectMessages(directMessagesCache);
             }
 
-            if (!dmInboxConversations || dmInboxConversations.length === 0) return;
+            try {
+                const storedConversations = getStoredDmConversations();
+                const messages = Array.isArray(storedConversations[normalizedKey]) ? storedConversations[normalizedKey] : [];
+                if (messages.length > 0) {
+                    storedConversations[normalizedKey] = messages.map(message => {
+                        if (!message || message.fbKey !== normalizedMessageKey) return message;
+                        return { ...message, ...updates };
+                    });
+                    saveStoredDmConversations(storedConversations);
+                }
+            } catch (storageErr) {
+                console.warn('Could not persist DM update locally:', storageErr);
+            }
+
+            if (!dmInboxConversations || dmInboxConversations.length === 0) {
+                return;
+            }
             dmInboxConversations = dmInboxConversations.map(conversation => {
                 if (conversation.key !== normalizedKey) return conversation;
                 const messages = (conversation.messages || []).map(message => {
@@ -2609,10 +2625,12 @@
                 text: cleaned,
                 edited: true
             };
+
+            cancelDmEdit();
             applyLocalDmMessageUpdate(normalizedKey, normalizedMessageKey, updatePayload);
             saveDirectMessageToApi(normalizedKey, { ...updatePayload, fbKey: normalizedMessageKey }).catch(() => {});
+
             database.ref(path).update(updatePayload).then(() => {
-                dmEditState = { conversationKey: null, messageKey: null, draft: '' };
                 if (normalizedKey === (claimedSoulTag || localStorage.getItem('archive_soul_tag') || '').trim().toLowerCase()) {
                     loadDirectMessages();
                 } else {
@@ -2620,7 +2638,6 @@
                 }
             }).catch((err) => {
                 console.warn('DM edit failed on Firebase, but applied locally:', err);
-                dmEditState = { conversationKey: null, messageKey: null, draft: '' };
                 if (normalizedKey === (claimedSoulTag || localStorage.getItem('archive_soul_tag') || '').trim().toLowerCase()) {
                     loadDirectMessages();
                 } else {
@@ -2632,7 +2649,7 @@
         function canManageDmMessage(message) {
             if (!message || message.deleted) return false;
             if (isAdminLoggedIn) {
-                return message.from === 'admin';
+                return true;
             }
             return message.from === 'user';
         }
@@ -2675,8 +2692,11 @@
                 mediaUrl: '',
                 mediaType: null
             };
+
+            cancelDmEdit();
             applyLocalDmMessageUpdate(normalizedKey, normalizedMessageKey, updatePayload);
             saveDirectMessageToApi(normalizedKey, { ...updatePayload, fbKey: normalizedMessageKey }).catch(() => {});
+
             database.ref(path).update(updatePayload).then(() => {
                 if (normalizedKey === (claimedSoulTag || localStorage.getItem('archive_soul_tag') || '').trim().toLowerCase()) {
                     loadDirectMessages();
@@ -2774,9 +2794,7 @@
             }
 
             fetchDirectMessagesFromApi(key).then((apiMessages) => {
-                const mergedMessages = [...localMessages, ...apiMessages]
-                    .filter((message, index, self) => index === self.findIndex(candidate => candidate.fbKey === message.fbKey))
-                    .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+                const mergedMessages = mergeDmMessages([...localMessages, ...apiMessages]);
                 directMessagesCache = mergedMessages;
                 renderDirectMessages(mergedMessages);
             }).catch(() => {});
@@ -2784,11 +2802,8 @@
             dmMessagesRef = database.ref('direct_messages/' + key);
             dmMessagesListener = (snapshot) => {
                 const rawMessages = snapshot.val() || {};
-                const ordered = Object.keys(rawMessages).map(itemKey => ({ fbKey: itemKey, ...rawMessages[itemKey] }))
-                    .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-                const mergedMessages = [...localMessages, ...ordered]
-                    .filter((message, index, self) => index === self.findIndex(candidate => candidate.fbKey === message.fbKey))
-                    .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+                const ordered = Object.keys(rawMessages).map(itemKey => ({ fbKey: itemKey, ...rawMessages[itemKey] }));
+                const mergedMessages = mergeDmMessages([...localMessages, ...ordered]);
                 directMessagesCache = mergedMessages;
                 renderDirectMessages(mergedMessages);
             };
@@ -3236,10 +3251,19 @@
             return [];
         }
 
+        function mergeDmMessages(messages) {
+            const messageMap = new Map();
+            (messages || []).forEach((message) => {
+                if (!message || typeof message !== 'object') return;
+                const key = String(message.fbKey || message.id || '').trim();
+                if (!key) return;
+                messageMap.set(key, message);
+            });
+            return Array.from(messageMap.values()).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+        }
+
         function mergeNormalizedDmConversationMessages(existingMessages, incomingMessages) {
-            const merged = [...(existingMessages || []), ...(incomingMessages || [])];
-            const deduped = merged.filter((message, index, self) => index === self.findIndex(candidate => (candidate.fbKey || candidate.id || '') === (message.fbKey || message.id || '')));
-            return deduped.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+            return mergeDmMessages([...(existingMessages || []), ...(incomingMessages || [])]);
         }
 
         function normalizeDmConversationMap(data) {
@@ -3484,9 +3508,7 @@
                 if (!conv || !conv.key) return;
                 const key = normalizeDmConversationKey(conv.key);
                 const existingMessages = merged[key]?.messages || [];
-                const combinedMessages = [...existingMessages, ...(conv.messages || [])]
-                    .filter((message, index, self) => index === self.findIndex(candidate => candidate.fbKey === message.fbKey))
-                    .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+                const combinedMessages = mergeDmMessages([...existingMessages, ...(conv.messages || [])]);
                 merged[key] = buildDmConversationPreview(key, combinedMessages);
             });
             return Object.values(merged).sort((a, b) => (b.messages[b.messages.length - 1]?.timestamp || 0) - (a.messages[a.messages.length - 1]?.timestamp || 0));
