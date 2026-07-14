@@ -4930,7 +4930,20 @@
                     timestamp: Date.now(),
                     isOfficial: true
                 };
-                persistDmMessageLocally(selectedDmKey, payload);
+                const localMessage = persistDmMessageLocally(selectedDmKey, payload);
+                try {
+                    const localMessages = getStoredDmConversationMessages(selectedDmKey);
+                    directMessagesCache = localMessages;
+                    renderDirectMessages(localMessages);
+
+                    // Update inbox preview immediately
+                    const storedViews = getStoredDmConversationViews();
+                    dmInboxConversations = mergeDmInboxConversations(dmInboxConversations || [], storedViews);
+                    persistDmInboxConversations(dmInboxConversations);
+                    renderDmInbox(dmInboxConversations);
+                } catch (uiErr) {
+                    console.warn('Could not render local admin DM immediately:', uiErr);
+                }
                 try {
                     await saveDirectMessageToApi(selectedDmKey, payload);
                 } catch (err) {
