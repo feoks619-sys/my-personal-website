@@ -2915,6 +2915,8 @@
             if (status) {
                 if (dmRecordingBlob) {
                     status.textContent = 'Recorded voicemail ready to send';
+                } else if (dmPendingAttachments.length > 0 && dmPendingAttachmentType === 'image') {
+                    status.textContent = 'Attached photo ready to send';
                 } else if (dmPendingAttachments.length > 0 && dmPendingAttachmentType === 'audio') {
                     status.textContent = 'Attached voicemail ready to send';
                 } else {
@@ -2959,6 +2961,8 @@
             if (status) {
                 if (adminDmRecordingBlob) {
                     status.textContent = 'Recorded voicemail ready to send';
+                } else if (adminDmPendingAttachments.length > 0 && adminDmPendingAttachmentType === 'image') {
+                    status.textContent = 'Attached photo ready to send';
                 } else if (adminDmPendingAttachments.length > 0 && adminDmPendingAttachmentType === 'audio') {
                     status.textContent = 'Attached voicemail ready to send';
                 } else {
@@ -3630,8 +3634,7 @@
             }
 
             clearDmRecordingFinalizeTimer();
-            if (!dmRecordingBlob && dmRecordingChunks.length === 0) {
-                dmPendingAttachments = [];
+            if (!dmRecordingBlob && dmRecordingChunks.length === 0 && dmPendingAttachments.length === 0) {
                 dmPendingAttachmentType = null;
                 dmPendingAttachmentNames = [];
             }
@@ -4996,8 +4999,7 @@
             const input = document.getElementById('admin-dm-reply-input');
             const text = (input ? input.value : '').trim();
             clearAdminDmRecordingFinalizeTimer();
-            if (!adminDmRecordingBlob && adminDmRecordingChunks && adminDmRecordingChunks.length === 0) {
-                adminDmPendingAttachments = [];
+            if (!adminDmRecordingBlob && adminDmRecordingChunks && adminDmRecordingChunks.length === 0 && adminDmPendingAttachments.length === 0) {
                 adminDmPendingAttachmentType = null;
                 adminDmPendingAttachmentNames = [];
             }
