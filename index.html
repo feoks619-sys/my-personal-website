@@ -487,28 +487,6 @@
             pointer-events: none;
         }
 
-        .dm-send-spinner {
-            display: inline-block;
-            width: 14px;
-            height: 14px;
-            margin-left: 8px;
-            border: 2px solid rgba(255,255,255,0.8);
-            border-top-color: #3d2200;
-            border-radius: 50%;
-            animation: dm-send-spin 0.8s linear infinite;
-            vertical-align: middle;
-            visibility: hidden;
-        }
-
-        .dm-send-spinner.visible {
-            visibility: visible;
-        }
-
-        @keyframes dm-send-spin {
-            from { transform: translateY(-50%) rotate(0deg); }
-            to { transform: translateY(-50%) rotate(360deg); }
-        }
-
         @media (max-width: 768px) {
             #typed-text {
                 font-size: 1rem;
@@ -2047,7 +2025,6 @@
                         <div id="admin-dm-record-status" class="dm-record-status"></div>
                     </div>
                     <button type="button" id="admin-dm-send-attach-btn" class="dm-attach-send-btn" onclick="sendAdminDmReply()" style="display:none;">send</button>
-                    <span id="admin-dm-send-spinner" class="dm-send-spinner" aria-hidden="true"></span>
                 </div>
                 <div class="admin-dm-reply-box">
                     <textarea id="admin-dm-reply-input" placeholder="reply to this whisper..."></textarea>
@@ -2956,9 +2933,6 @@
                 btn.disabled = isLoading;
             });
 
-            const adminSpinner = document.getElementById('admin-dm-send-spinner');
-            if (adminSpinner) adminSpinner.classList.toggle('visible', isLoading);
-
             const status = document.getElementById('admin-dm-record-status');
             if (status) {
                 status.textContent = isLoading && message ? message : '';
@@ -3230,7 +3204,11 @@
             const status = document.getElementById('dm-record-status');
             if (status) status.textContent = '';
             const sendButton = document.getElementById('dm-send-attach-btn');
-            if (sendButton) sendButton.style.display = 'none';
+            if (sendButton) {
+                sendButton.style.display = 'none';
+                sendButton.classList.remove('loading');
+                sendButton.disabled = false;
+            }
             const photoInput = document.getElementById('dm-photo-input');
             const audioInput = document.getElementById('dm-audio-input');
             if (photoInput) photoInput.value = '';
@@ -3257,7 +3235,11 @@
             const status = document.getElementById('admin-dm-record-status');
             if (status) status.textContent = '';
             const sendButton = document.getElementById('admin-dm-send-attach-btn');
-            if (sendButton) sendButton.style.display = 'none';
+            if (sendButton) {
+                sendButton.style.display = 'none';
+                sendButton.classList.remove('loading');
+                sendButton.disabled = false;
+            }
             const photoInput = document.getElementById('admin-dm-photo-input');
             const audioInput = document.getElementById('admin-dm-audio-input');
             if (photoInput) photoInput.value = '';
@@ -3743,7 +3725,7 @@
             const statusEl = document.getElementById('dm-record-status');
             const inputField = document.getElementById('dm-input');
             if (inputField) inputField.value = '';
-            setDmSendLoading(true, 'Uploading…');
+            setDmSendLoading(true, '');
 
             try {
                 const urls = await Promise.all(attachments.map(file => promiseWithTimeout(uploadDmAttachmentFile(file, key), 15000, 'DM upload timed out')));
@@ -5126,7 +5108,7 @@
             const attachmentType = adminDmPendingAttachmentType === 'image' ? 'image' : 'audio';
             const inputField = document.getElementById('admin-dm-reply-input');
             if (inputField) inputField.value = '';
-            setAdminDmSendLoading(true, 'Uploading…');
+            setAdminDmSendLoading(true, '');
             try {
                 const urls = await Promise.all(attachments.map(file => promiseWithTimeout(uploadDmAttachmentFile(file, selectedDmKey), 15000, 'DM upload timed out')));
                 await Promise.all(urls.map(mediaUrl => sendPayload(mediaUrl, attachmentType)));
