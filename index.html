@@ -2330,9 +2330,12 @@
             const normalized = normalizePostsPayload(data);
             normalized.sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
 
-            const mergedPosts = Array.isArray(globalPostsCache) && globalPostsCache.length > 0
-                ? mergePostsLists(globalPostsCache, normalized)
-                : normalized;
+            const pendingLocalPosts = Array.isArray(globalPostsCache)
+                ? globalPostsCache.filter((post) => post && post.pending === true)
+                : [];
+            const mergedPosts = source === 'local'
+                ? mergePostsLists(globalPostsCache || [], normalized)
+                : mergePostsLists(pendingLocalPosts, normalized);
 
             globalPostsCache = mergedPosts;
             hydrateRegisteredSoulsFallback(mergedPosts);
@@ -2764,25 +2767,29 @@
             }
 
             const localMessages = getStoredDmConversationMessages(key);
-            if (localMessages.length > 0) {
-                directMessagesCache = localMessages;
-                renderDirectMessages(localMessages);
-            } else {
-                directMessagesCache = [];
-                renderDirectMessages([]);
-            }
+            directMessagesCache = [];
+            renderDirectMessages([]);
 
             fetchDirectMessagesFromApi(key).then((apiMessages) => {
-                const mergedMessages = mergeDmMessages([...localMessages, ...apiMessages]);
+                const mergedMessages = mergeDmMessages([...apiMessages, ...localMessages]);
                 directMessagesCache = mergedMessages;
                 renderDirectMessages(mergedMessages);
-            }).catch(() => {});
+                if (mergedMessages.length === 0 && localMessages.length > 0) {
+                    directMessagesCache = localMessages;
+                    renderDirectMessages(localMessages);
+                }
+            }).catch(() => {
+                if (localMessages.length > 0) {
+                    directMessagesCache = localMessages;
+                    renderDirectMessages(localMessages);
+                }
+            });
 
             dmMessagesRef = database.ref('direct_messages/' + key);
             dmMessagesListener = (snapshot) => {
                 const rawMessages = snapshot.val() || {};
                 const ordered = Object.keys(rawMessages).map(itemKey => ({ fbKey: itemKey, ...rawMessages[itemKey] }));
-                const mergedMessages = mergeDmMessages([...localMessages, ...ordered]);
+                const mergedMessages = mergeDmMessages([...ordered, ...localMessages]);
                 directMessagesCache = mergedMessages;
                 renderDirectMessages(mergedMessages);
             };
@@ -3834,13 +3841,12 @@
 
             const cachedPosts = getCachedPosts();
             if (cachedPosts.length > 0) {
-                globalPostsCache = cachedPosts;
-                globalPostsCache.sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
-                setPostsLoadState('ready', '', null);
-                renderStream();
+                globalPostsCache = [];
+                setPostsLoadState('loading', 'Loading fragments...');
             } else {
                 setPostsLoadState('loading', 'Loading fragments...');
             }
+            renderStream();
 
             // Living Listener: Automatically triggers UI update across all global devices when data changes
             try {
@@ -4232,11 +4238,10 @@
             if (!listenerSeenData && (!globalPostsCache || globalPostsCache.length === 0)) {
                 const cachedPosts = getCachedPosts();
                 if (cachedPosts.length > 0) {
-                    globalPostsCache = cachedPosts;
-                    globalPostsCache.sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
-                    setPostsLoadState('ready', '', null);
+                    globalPostsCache = [];
+                    setPostsLoadState('loading', 'Loading fragments...');
                     renderStream();
-                    console.log('showFeed: displaying cached posts while fetching fresh data in background');
+                    console.log('showFeed: waiting for live posts; using cache only if live refresh fails');
                     fetchPostsViaRest();
                 } else {
                     setPostsLoadState('loading', 'Loading fragments...');
