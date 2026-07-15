@@ -3217,6 +3217,15 @@
         }
 
         function hideDmAttachmentUi() {
+            dmPendingAttachments = [];
+            dmPendingAttachmentType = null;
+            dmPendingAttachmentNames = [];
+            dmRecordingChunks = [];
+            dmRecordingBlob = null;
+            dmRecordingUrl = null;
+            dmRecordingStopping = false;
+            dmRecorder = null;
+            clearDmRecordingFinalizeTimer();
             const label = document.getElementById('dm-attachment-name');
             const status = document.getElementById('dm-record-status');
             const sendButton = document.getElementById('dm-send-attach-btn');
@@ -3231,6 +3240,7 @@
             const audioInput = document.getElementById('dm-audio-input');
             if (photoInput) photoInput.value = '';
             if (audioInput) audioInput.value = '';
+            updateDmAttachmentControls();
         }
 
         function clearAdminDmAttachment() {
@@ -3265,6 +3275,15 @@
         }
 
         function hideAdminDmAttachmentUi() {
+            adminDmPendingAttachments = [];
+            adminDmPendingAttachmentType = null;
+            adminDmPendingAttachmentNames = [];
+            adminDmRecordingChunks = [];
+            adminDmRecordingBlob = null;
+            adminDmRecordingUrl = null;
+            adminDmRecordingStopping = false;
+            adminDmRecorder = null;
+            clearAdminDmRecordingFinalizeTimer();
             const label = document.getElementById('admin-dm-attachment-name');
             const status = document.getElementById('admin-dm-record-status');
             const sendButton = document.getElementById('admin-dm-send-attach-btn');
@@ -3279,6 +3298,7 @@
             const audioInput = document.getElementById('admin-dm-audio-input');
             if (photoInput) photoInput.value = '';
             if (audioInput) audioInput.value = '';
+            updateAdminDmAttachmentControls();
         }
 
         function normalizeDmConversationKey(value) {
@@ -3438,12 +3458,17 @@
 
         function getStoredDmConversations() {
             try {
+                const mergedConversations = {};
                 const candidates = collectDmStorageCandidates();
-                for (const candidate of candidates) {
+                candidates.forEach((candidate) => {
                     const normalized = normalizeDmConversationMap(candidate);
-                    if (Object.keys(normalized).length > 0) return normalized;
-                }
-                return {};
+                    Object.keys(normalized).forEach((key) => {
+                        const existingMessages = Array.isArray(mergedConversations[key]) ? mergedConversations[key] : [];
+                        const incomingMessages = Array.isArray(normalized[key]) ? normalized[key] : [];
+                        mergedConversations[key] = mergeDmMessages([...existingMessages, ...incomingMessages]);
+                    });
+                });
+                return mergedConversations;
             } catch (err) {
                 console.warn('Could not read stored DM conversations:', err);
                 return {};
@@ -3765,6 +3790,7 @@
             try {
                 const urls = await Promise.all(attachments.map(file => promiseWithTimeout(uploadDmAttachmentFile(file, key), 15000, 'DM upload timed out')));
                 await Promise.all(urls.map(mediaUrl => saveDirectMessage(text, mediaUrl, attachmentType)));
+                hideDmAttachmentUi();
                 clearDmAttachment();
             } catch (err) {
                 console.warn('DM upload failed:', err);
@@ -5148,6 +5174,8 @@
             try {
                 const urls = await Promise.all(attachments.map(file => promiseWithTimeout(uploadDmAttachmentFile(file, selectedDmKey), 15000, 'DM upload timed out')));
                 await Promise.all(urls.map(mediaUrl => sendPayload(mediaUrl, attachmentType)));
+                hideAdminDmAttachmentUi();
+                clearAdminDmAttachment();
             } catch (err) {
                 console.warn('Admin DM upload failed:', err);
                 if (attachments.length > 0) {
