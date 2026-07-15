@@ -2931,48 +2931,57 @@
         function setDmSendLoading(isLoading, message) {
             const sendButtons = [
                 document.querySelector('.dm-composer button'),
-                document.getElementById('dm-send-attach-btn'),
+                document.getElementById('dm-send-attach-btn')
+            ].filter(Boolean);
+
+            sendButtons.forEach(btn => {
+                btn.classList.toggle('loading', isLoading);
+                btn.disabled = isLoading;
+            });
+
+            const status = document.getElementById('dm-record-status');
+            if (status) {
+                status.textContent = isLoading && message ? message : '';
+            }
+        }
+
+        function setAdminDmSendLoading(isLoading, message) {
+            const sendButtons = [
                 document.querySelector('.admin-dm-reply-box button'),
                 document.getElementById('admin-dm-send-attach-btn')
             ].filter(Boolean);
 
             sendButtons.forEach(btn => {
-                if (isLoading) {
-                    btn.classList.add('loading');
-                    btn.disabled = true;
-                } else {
-                    btn.classList.remove('loading');
-                    btn.disabled = false;
-                }
+                btn.classList.toggle('loading', isLoading);
+                btn.disabled = isLoading;
             });
 
-            const dmSpinner = document.getElementById('dm-send-spinner');
             const adminSpinner = document.getElementById('admin-dm-send-spinner');
-            if (dmSpinner) dmSpinner.classList.toggle('visible', isLoading);
             if (adminSpinner) adminSpinner.classList.toggle('visible', isLoading);
 
-            const status = document.getElementById('dm-record-status');
-            const adminStatus = document.getElementById('admin-dm-record-status');
-            if (isLoading && message) {
-                if (status) status.textContent = message;
-                if (adminStatus) adminStatus.textContent = message;
-            } else {
-                if (status) status.textContent = '';
-                if (adminStatus) adminStatus.textContent = '';
+            const status = document.getElementById('admin-dm-record-status');
+            if (status) {
+                status.textContent = isLoading && message ? message : '';
             }
         }
 
         function resetDmLoadingUi() {
             setDmSendLoading(false, '');
-            const dmSpinner = document.getElementById('dm-send-spinner');
-            const adminSpinner = document.getElementById('admin-dm-send-spinner');
-            if (dmSpinner) dmSpinner.classList.remove('visible');
-            if (adminSpinner) adminSpinner.classList.remove('visible');
             const dmComposerButton = document.querySelector('.dm-composer button');
             const dmAttachSendButton = document.getElementById('dm-send-attach-btn');
+            [dmComposerButton, dmAttachSendButton].forEach(btn => {
+                if (btn) {
+                    btn.classList.remove('loading');
+                    btn.disabled = false;
+                }
+            });
+        }
+
+        function resetAdminDmLoadingUi() {
+            setAdminDmSendLoading(false, '');
             const adminReplyButton = document.querySelector('.admin-dm-reply-box button');
             const adminAttachSendButton = document.getElementById('admin-dm-send-attach-btn');
-            [dmComposerButton, dmAttachSendButton, adminReplyButton, adminAttachSendButton].forEach(btn => {
+            [adminReplyButton, adminAttachSendButton].forEach(btn => {
                 if (btn) {
                     btn.classList.remove('loading');
                     btn.disabled = false;
@@ -3240,7 +3249,7 @@
             adminDmRecorder = null;
             clearAdminDmRecordingFinalizeTimer();
             stopAdminDmRecording();
-            resetDmLoadingUi();
+            resetAdminDmLoadingUi();
             const input = document.getElementById('admin-dm-reply-input');
             if (input) input.value = '';
             const label = document.getElementById('admin-dm-attachment-name');
@@ -3751,7 +3760,7 @@
                     alert('Your attachment could not be sent right now.');
                 }
             } finally {
-                setDmSendLoading(false, '');
+                resetDmLoadingUi();
                 clearDmAttachment();
                 updateDmAttachmentControls();
             }
@@ -5115,7 +5124,7 @@
             const attachmentType = adminDmPendingAttachmentType === 'image' ? 'image' : 'audio';
             const inputField = document.getElementById('admin-dm-reply-input');
             if (inputField) inputField.value = '';
-            setDmSendLoading(true, 'Uploading…');
+            setAdminDmSendLoading(true, 'Uploading…');
             try {
                 const urls = await Promise.all(attachments.map(file => promiseWithTimeout(uploadDmAttachmentFile(file, selectedDmKey), 15000, 'DM upload timed out')));
                 await Promise.all(urls.map(mediaUrl => sendPayload(mediaUrl, attachmentType)));
@@ -5133,7 +5142,7 @@
                     alert('Your attachment could not be sent right now.');
                 }
             } finally {
-                setDmSendLoading(false, '');
+                resetAdminDmLoadingUi();
                 clearAdminDmAttachment();
                 updateAdminDmAttachmentControls();
             }
