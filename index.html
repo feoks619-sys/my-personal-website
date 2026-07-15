@@ -3642,6 +3642,7 @@
 
             const input = document.getElementById('dm-input');
             if (input) input.value = '';
+            resetDmLoadingUi();
             clearDmAttachment();
             loadDirectMessages();
             loadAdminDmInbox();
@@ -5107,6 +5108,7 @@
                     console.warn('Admin DM send failed, stored locally instead:', err);
                 }
                 if (input) input.value = '';
+                resetAdminDmLoadingUi();
                 clearAdminDmAttachment();
                 loadDirectMessages();
                 loadAdminDmInbox();
