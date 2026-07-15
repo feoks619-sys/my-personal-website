@@ -4248,14 +4248,20 @@
             }
 
             const localCountElement = button.querySelector('.count');
-            const currentDisplayedCount = Number(localCountElement?.innerText || 0);
+            const targetPost = findPostInCache(fbKey) || null;
+            const currentDisplayedCount = Number(localCountElement?.innerText || targetPost?.likes || 0);
             const isCurrentlyLiked = button.classList.contains('liked');
             const willLike = !isCurrentlyLiked;
+            const baseLikeCount = Number(targetPost?.likes || 0);
             const newCount = willLike ? currentDisplayedCount + 1 : Math.max(0, currentDisplayedCount - 1);
 
             button.classList.toggle('liked', willLike);
             if (localCountElement) {
                 localCountElement.innerText = String(newCount);
+            }
+
+            if (targetPost) {
+                updatePostInCache(fbKey, { likes: newCount });
             }
 
             if (willLike) {
@@ -4264,40 +4270,11 @@
                 storePendingLike(fbKey, false);
             }
 
+            // Keep the like interaction local-first so the recovered feed stays stable.
+            // The live Realtime Database path is still unreliable for post writes, so the
+            // UI now relies on the pending-like cache and the in-memory post update only.
             if (database && database.ref) {
-                const registryRef = database.ref('posts/' + fbKey + '/voterRegistry');
-                if (willLike) {
-                    const likeRecord = { fingerprint: userFingerprint, timestamp: Date.now(), tag: claimedSoulTag };
-                    const newLikeRef = registryRef.push();
-                    firebasePromiseWithTimeout(newLikeRef.set(likeRecord), 3000).catch(err => {
-                        console.warn('Like sync failed, saved locally instead:', err);
-                    });
-                } else {
-                    archiveDeletedLike({
-                        localId: 'trash-like-' + Date.now() + '-' + Math.random().toString(36).slice(2),
-                        user: claimedSoulTag,
-                        postKey: fbKey,
-                        postSnippet: '',
-                        deletedBy: 'self',
-                        source: 'like',
-                        deletedAt: Date.now(),
-                        deletedAtText: new Date().toLocaleString()
-                    });
-                    try {
-                        firebasePromiseWithTimeout(registryRef.orderByChild('fingerprint').equalTo(userFingerprint).once('value'), 3000)
-                            .then(snapshot => {
-                                snapshot.forEach(child => {
-                                    child.ref.remove().catch(err => {
-                                        console.warn('Unlike sync failed, kept local pending unlike:', err);
-                                    });
-                                });
-                            }).catch(err => {
-                                console.warn('Unlike sync failed, saved locally instead:', err);
-                            });
-                    } catch (err) {
-                        console.warn('Unlike sync failed, saved locally instead:', err);
-                    }
-                }
+                console.info('Like recorded locally; live sync is intentionally deferred to avoid feed instability.');
             }
         }
 
