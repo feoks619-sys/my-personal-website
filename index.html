@@ -2949,8 +2949,8 @@
                 if (status) status.textContent = message;
                 if (adminStatus) adminStatus.textContent = message;
             } else {
-                if (status && !dmPendingAttachments.length && !dmRecordingBlob) status.textContent = '';
-                if (adminStatus && !adminDmPendingAttachments.length && !adminDmRecordingBlob) adminStatus.textContent = '';
+                if (status) status.textContent = '';
+                if (adminStatus) adminStatus.textContent = '';
             }
         }
 
@@ -3723,9 +3723,9 @@
                     alert('Your attachment could not be sent right now.');
                 }
             } finally {
-                setDmSendLoading(false);
-                updateDmAttachmentControls();
+                setDmSendLoading(false, '');
                 clearDmAttachment();
+                updateDmAttachmentControls();
             }
         }
 
@@ -5105,7 +5105,9 @@
                     alert('Your attachment could not be sent right now.');
                 }
             } finally {
-                setDmSendLoading(false);
+                setDmSendLoading(false, '');
+                clearAdminDmAttachment();
+                updateAdminDmAttachmentControls();
             }
         }
 
