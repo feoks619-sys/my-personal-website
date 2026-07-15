@@ -2357,7 +2357,9 @@
                     if (!response.ok) {
                         throw new Error('HTTP ' + response.status);
                     }
-                    const data = await response.json();
+                    const rawText = await response.text();
+                    const textWithoutBom = String(rawText || '').replace(/^\uFEFF/, '');
+                    const data = JSON.parse(textWithoutBom);
                     if (data && typeof data === 'object' && Object.keys(data).length > 0) {
                         localArchivePreferred = true;
                         applyPostsPayload(data, 'local');
