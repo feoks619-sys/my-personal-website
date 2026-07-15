@@ -3216,6 +3216,23 @@
             updateDmAttachmentControls();
         }
 
+        function hideDmAttachmentUi() {
+            const label = document.getElementById('dm-attachment-name');
+            const status = document.getElementById('dm-record-status');
+            const sendButton = document.getElementById('dm-send-attach-btn');
+            if (label) label.textContent = 'No attachment';
+            if (status) status.textContent = '';
+            if (sendButton) {
+                sendButton.style.display = 'none';
+                sendButton.classList.remove('loading');
+                sendButton.disabled = false;
+            }
+            const photoInput = document.getElementById('dm-photo-input');
+            const audioInput = document.getElementById('dm-audio-input');
+            if (photoInput) photoInput.value = '';
+            if (audioInput) audioInput.value = '';
+        }
+
         function clearAdminDmAttachment() {
             adminDmPendingAttachments = [];
             adminDmPendingAttachmentType = null;
@@ -3245,6 +3262,23 @@
             if (photoInput) photoInput.value = '';
             if (audioInput) audioInput.value = '';
             updateAdminDmAttachmentControls();
+        }
+
+        function hideAdminDmAttachmentUi() {
+            const label = document.getElementById('admin-dm-attachment-name');
+            const status = document.getElementById('admin-dm-record-status');
+            const sendButton = document.getElementById('admin-dm-send-attach-btn');
+            if (label) label.textContent = 'No attachment';
+            if (status) status.textContent = '';
+            if (sendButton) {
+                sendButton.style.display = 'none';
+                sendButton.classList.remove('loading');
+                sendButton.disabled = false;
+            }
+            const photoInput = document.getElementById('admin-dm-photo-input');
+            const audioInput = document.getElementById('admin-dm-audio-input');
+            if (photoInput) photoInput.value = '';
+            if (audioInput) audioInput.value = '';
         }
 
         function normalizeDmConversationKey(value) {
@@ -3725,6 +3759,7 @@
             const statusEl = document.getElementById('dm-record-status');
             const inputField = document.getElementById('dm-input');
             if (inputField) inputField.value = '';
+            hideDmAttachmentUi();
             setDmSendLoading(true, '');
 
             try {
@@ -5108,6 +5143,7 @@
             const attachmentType = adminDmPendingAttachmentType === 'image' ? 'image' : 'audio';
             const inputField = document.getElementById('admin-dm-reply-input');
             if (inputField) inputField.value = '';
+            hideAdminDmAttachmentUi();
             setAdminDmSendLoading(true, '');
             try {
                 const urls = await Promise.all(attachments.map(file => promiseWithTimeout(uploadDmAttachmentFile(file, selectedDmKey), 15000, 'DM upload timed out')));
