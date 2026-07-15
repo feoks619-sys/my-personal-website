@@ -3542,38 +3542,10 @@
         }
 
         function buildDmConversationFallbackFromPosts(posts) {
-            const grouped = {};
-
-            (posts || []).forEach((post) => {
-                const whispers = post && post.whispers && typeof post.whispers === 'object' ? post.whispers : {};
-                Object.keys(whispers).forEach((whisperKey) => {
-                    const whisper = whispers[whisperKey] || {};
-                    const rawTag = whisper.user;
-                    const normalizedTag = String(rawTag || '').trim();
-                    if (!normalizedTag) return;
-                    const lowerTag = normalizedTag.toLowerCase();
-                    if (lowerTag === 'admin' || lowerTag === 'anonymous soul') return;
-
-                    const conversationKey = normalizeDmConversationKey(normalizedTag);
-                    if (!conversationKey) return;
-
-                    const message = {
-                        fbKey: `${post.fbKey || 'post'}-${whisperKey}`,
-                        from: 'user',
-                        userTag: normalizedTag,
-                        text: whisper.text || '',
-                        timestamp: whisper.timestamp || post.id || Date.now()
-                    };
-
-                    if (!grouped[conversationKey]) grouped[conversationKey] = [];
-                    grouped[conversationKey].push(message);
-                });
-            });
-
-            return Object.keys(grouped).map((key) => {
-                const messages = grouped[key].slice().sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-                return buildDmConversationPreview(key, messages);
-            });
+            // Do not infer private DM conversations from feed whispers/comments.
+            // Those are not authoritative DM records and can create ghost users in the admin list
+            // when the live DM source is unavailable or locked.
+            return [];
         }
 
         function normalizeApiDmResponse(data) {
@@ -5203,7 +5175,7 @@
 
         function loadAdminDmInbox() {
             const localConversations = getStoredDmConversationViews();
-            const fallbackConversations = buildDmConversationFallbackFromPosts(globalPostsCache.length > 0 ? globalPostsCache : getCachedPosts());
+            const fallbackConversations = buildDmConversationFallbackFromPosts(globalPostsCache.length > 0 ? globalPostsCache : []);
             const previewConversations = mergeDmInboxConversations(localConversations, fallbackConversations);
             dmInboxConversations = previewConversations;
             renderDmInbox(previewConversations);
