@@ -2962,6 +2962,24 @@
             }
         }
 
+        function resetDmLoadingUi() {
+            setDmSendLoading(false, '');
+            const dmSpinner = document.getElementById('dm-send-spinner');
+            const adminSpinner = document.getElementById('admin-dm-send-spinner');
+            if (dmSpinner) dmSpinner.classList.remove('visible');
+            if (adminSpinner) adminSpinner.classList.remove('visible');
+            const dmComposerButton = document.querySelector('.dm-composer button');
+            const dmAttachSendButton = document.getElementById('dm-send-attach-btn');
+            const adminReplyButton = document.querySelector('.admin-dm-reply-box button');
+            const adminAttachSendButton = document.getElementById('admin-dm-send-attach-btn');
+            [dmComposerButton, dmAttachSendButton, adminReplyButton, adminAttachSendButton].forEach(btn => {
+                if (btn) {
+                    btn.classList.remove('loading');
+                    btn.disabled = false;
+                }
+            });
+        }
+
         function updateAdminDmAttachmentControls() {
             const label = document.getElementById('admin-dm-attachment-name');
             const status = document.getElementById('admin-dm-record-status');
@@ -3195,6 +3213,7 @@
             dmRecorder = null;
             clearDmRecordingFinalizeTimer();
             stopDmRecording();
+            resetDmLoadingUi();
             const input = document.getElementById('dm-input');
             if (input) input.value = '';
             const label = document.getElementById('dm-attachment-name');
@@ -3221,6 +3240,7 @@
             adminDmRecorder = null;
             clearAdminDmRecordingFinalizeTimer();
             stopAdminDmRecording();
+            resetDmLoadingUi();
             const input = document.getElementById('admin-dm-reply-input');
             if (input) input.value = '';
             const label = document.getElementById('admin-dm-attachment-name');
