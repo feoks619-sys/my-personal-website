@@ -2929,7 +2929,13 @@
         }
 
         function setDmSendLoading(isLoading, message) {
-            const sendButtons = Array.from(document.querySelectorAll('.dm-composer button, #dm-send-attach-btn, .admin-dm-reply-box button, #admin-dm-send-attach-btn'));
+            const sendButtons = [
+                document.querySelector('.dm-composer button'),
+                document.getElementById('dm-send-attach-btn'),
+                document.querySelector('.admin-dm-reply-box button'),
+                document.getElementById('admin-dm-send-attach-btn')
+            ].filter(Boolean);
+
             sendButtons.forEach(btn => {
                 if (isLoading) {
                     btn.classList.add('loading');
@@ -2939,10 +2945,12 @@
                     btn.disabled = false;
                 }
             });
+
             const dmSpinner = document.getElementById('dm-send-spinner');
             const adminSpinner = document.getElementById('admin-dm-send-spinner');
             if (dmSpinner) dmSpinner.classList.toggle('visible', isLoading);
             if (adminSpinner) adminSpinner.classList.toggle('visible', isLoading);
+
             const status = document.getElementById('dm-record-status');
             const adminStatus = document.getElementById('admin-dm-record-status');
             if (isLoading && message) {
