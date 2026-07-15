@@ -3811,14 +3811,9 @@
                 getFcmToken();
             }
 
-            const cachedPosts = getCachedPosts();
-            if (cachedPosts.length > 0) {
-                globalPostsCache = [];
-                setPostsLoadState('loading', 'Loading fragments...');
-            } else {
-                setPostsLoadState('loading', 'Loading fragments...');
-            }
+            setPostsLoadState('loading', 'Loading fragments...');
             renderStream();
+            fetchPostsFromLocalArchive().catch(() => {});
 
             // Living Listener: Automatically triggers UI update across all global devices when data changes
             try {
@@ -4208,18 +4203,16 @@
             document.getElementById('text-gate').style.display = 'none';
             document.getElementById('feed-screen').style.display = 'flex';
             if (!listenerSeenData && (!globalPostsCache || globalPostsCache.length === 0)) {
-                const cachedPosts = getCachedPosts();
-                if (cachedPosts.length > 0) {
-                    globalPostsCache = [];
-                    setPostsLoadState('loading', 'Loading fragments...');
-                    renderStream();
-                    console.log('showFeed: waiting for live posts; using cache only if live refresh fails');
+                setPostsLoadState('loading', 'Loading fragments...');
+                renderStream();
+                fetchPostsFromLocalArchive().then((success) => {
+                    if (!success) {
+                        console.log('showFeed: archive fallback unavailable, trying the REST fallback');
+                        fetchPostsViaRest();
+                    }
+                }).catch(() => {
                     fetchPostsViaRest();
-                } else {
-                    setPostsLoadState('loading', 'Loading fragments...');
-                    console.log('showFeed: no realtime data yet, fetching posts via REST fallback');
-                    fetchPostsViaRest();
-                }
+                });
             }
             
             // If they haven't picked a profile name yet, intercept them with the portal
