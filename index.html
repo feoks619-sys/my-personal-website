@@ -2943,11 +2943,14 @@
             const adminSpinner = document.getElementById('admin-dm-send-spinner');
             if (dmSpinner) dmSpinner.classList.toggle('visible', isLoading);
             if (adminSpinner) adminSpinner.classList.toggle('visible', isLoading);
-            if (message) {
-                const status = document.getElementById('dm-record-status');
-                const adminStatus = document.getElementById('admin-dm-record-status');
+            const status = document.getElementById('dm-record-status');
+            const adminStatus = document.getElementById('admin-dm-record-status');
+            if (isLoading && message) {
                 if (status) status.textContent = message;
                 if (adminStatus) adminStatus.textContent = message;
+            } else {
+                if (status && !dmPendingAttachments.length && !dmRecordingBlob) status.textContent = '';
+                if (adminStatus && !adminDmPendingAttachments.length && !adminDmRecordingBlob) adminStatus.textContent = '';
             }
         }
 
@@ -3196,6 +3199,7 @@
             const audioInput = document.getElementById('dm-audio-input');
             if (photoInput) photoInput.value = '';
             if (audioInput) audioInput.value = '';
+            updateDmAttachmentControls();
         }
 
         function clearAdminDmAttachment() {
@@ -3221,6 +3225,7 @@
             const audioInput = document.getElementById('admin-dm-audio-input');
             if (photoInput) photoInput.value = '';
             if (audioInput) audioInput.value = '';
+            updateAdminDmAttachmentControls();
         }
 
         function normalizeDmConversationKey(value) {
@@ -3712,6 +3717,7 @@
                 try {
                     const dataUrls = await Promise.all(attachments.map(file => promiseWithTimeout(readDmFileAsDataUrl(file), 10000, 'File read timed out')));
                     await Promise.all(dataUrls.map(dataUrl => saveDirectMessage(text, dataUrl, attachmentType)));
+                    clearDmAttachment();
                 } catch (fallbackErr) {
                     console.error('Fallback DM upload failed:', fallbackErr);
                     alert('Your attachment could not be sent right now.');
@@ -3719,6 +3725,7 @@
             } finally {
                 setDmSendLoading(false);
                 updateDmAttachmentControls();
+                clearDmAttachment();
             }
         }
 
