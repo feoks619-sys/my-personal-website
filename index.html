@@ -2118,7 +2118,7 @@
         let dmMessagesRef = null;
         let dmMessagesListener = null;
         let currentView = "live"; 
-        let globalPostsCache = [];
+        let globalPostsCache = getCachedPosts();
         let listenerSeenData = false;
         let localArchivePreferred = false;
         let postsLoadStatus = 'loading';
