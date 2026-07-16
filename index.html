@@ -2120,6 +2120,60 @@
         let currentView = "live"; 
         let globalPostsCache = getCachedPosts();
         let listenerSeenData = false;
+
+        function replayPendingLikesIntoCache(posts = globalPostsCache) {
+            try {
+                const pendingLikes = JSON.parse(localStorage.getItem('archive_pending_likes') || '{}');
+                const normalizedPosts = Array.isArray(posts) ? posts.map(post => ({ ...post })) : [];
+                if (!pendingLikes || typeof pendingLikes !== 'object' || Object.keys(pendingLikes).length === 0) {
+                    return normalizedPosts;
+                }
+
+                Object.keys(pendingLikes).forEach((postKey) => {
+                    const pending = pendingLikes[postKey];
+                    if (!pending || pending.fingerprint !== userFingerprint) {
+                        return;
+                    }
+                    const post = normalizedPosts.find((entry) => {
+                        const entryKey = String(entry && entry.fbKey ? entry.fbKey : '').trim();
+                        const entryId = String(entry && entry.id ? entry.id : '').trim();
+                        return entryKey === String(postKey || '').trim() || entryId === String(postKey || '').trim();
+                    });
+                    if (!post) return;
+                    const registry = { ...(post.voterRegistry || {}) };
+                    if (pending.action === 'like') {
+                        const hasEntry = Object.values(registry).some((entry) => {
+                            if (entry && typeof entry === 'object') {
+                                return String(entry.fingerprint || '').trim() === String(userFingerprint || '').trim();
+                            }
+                            return String(entry || '').trim() === String(userFingerprint || '').trim();
+                        });
+                        if (!hasEntry) {
+                            registry[Date.now().toString(36) + Math.random().toString(36).slice(2, 7)] = {
+                                fingerprint: userFingerprint,
+                                tag: pending.tag || claimedSoulTag || '',
+                                timestamp: pending.timestamp || Date.now()
+                            };
+                        }
+                    } else {
+                        Object.keys(registry).forEach((key) => {
+                            const entry = registry[key];
+                            const entryFingerprint = entry && typeof entry === 'object' ? String(entry.fingerprint || '') : String(entry || '');
+                            if (entryFingerprint === String(userFingerprint || '').trim()) {
+                                delete registry[key];
+                            }
+                        });
+                    }
+                    post.voterRegistry = registry;
+                    post.likes = countUniqueLikeVoters(post);
+                });
+
+                return normalizedPosts;
+            } catch (err) {
+                console.warn('Could not replay pending likes into cache:', err);
+                return Array.isArray(posts) ? posts.map(post => ({ ...post })) : [];
+            }
+        }
         let localArchivePreferred = false;
         let postsLoadStatus = 'loading';
         let postsLoadMessage = 'Loading fragments...';
@@ -2401,15 +2455,16 @@
                 ? globalPostsCache
                 : [];
             const mergedPosts = mergePostsLists(baseCache, normalized);
+            const hydratedPosts = replayPendingLikesIntoCache(mergedPosts);
 
-            globalPostsCache = mergedPosts;
-            hydrateRegisteredSoulsFallback(mergedPosts);
+            globalPostsCache = hydratedPosts;
+            hydrateRegisteredSoulsFallback(hydratedPosts);
             if (source === 'listener') {
                 listenerSeenData = true;
             }
-            if (mergedPosts.length > 0) {
+            if (hydratedPosts.length > 0) {
                 setPostsLoadState('ready', '', null);
-                saveCachedPosts(mergedPosts);
+                saveCachedPosts(hydratedPosts);
             } else {
                 setPostsLoadState('empty', 'No fragments are available right now.', null);
             }
