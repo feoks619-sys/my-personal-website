@@ -3953,8 +3953,16 @@
                 getFcmToken();
             }
 
-            setPostsLoadState('loading', 'Loading fragments...');
-            renderStream();
+            const cachedPosts = getCachedPosts();
+            if (cachedPosts.length > 0) {
+                globalPostsCache = cachedPosts;
+                globalPostsCache.sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
+                setPostsLoadState('ready', 'Showing cached archive data.', null);
+                renderStream();
+            } else {
+                setPostsLoadState('loading', 'Loading fragments...');
+                renderStream();
+            }
             fetchPostsFromLocalArchive().catch(() => {});
 
             // Living Listener: Automatically triggers UI update across all global devices when data changes
@@ -4615,10 +4623,13 @@
                     console.warn('Could not read comment for trash archive:', err);
                 })
                 .finally(() => {
-                    const liveKeysToRemove = Object.keys(liveWhispers).filter((key) => {
+                    const liveKeysToRemove = new Set(Object.keys(liveWhispers).filter((key) => {
                         if (shouldDeleteCurrentKeyFallback && key === whisperKey) return true;
                         return getCommentSignature(liveWhispers[key]) === commentSignature;
-                    });
+                    }));
+                    if (whisperKey) {
+                        liveKeysToRemove.add(whisperKey);
+                    }
                     liveKeysToRemove.forEach((key) => {
                         firebasePromiseWithTimeout(database.ref('posts/' + postKey + '/whispers/' + key).remove(), 3000)
                             .then(() => renderStream())
@@ -4627,7 +4638,7 @@
                                 renderStream();
                             });
                     });
-                    if (liveKeysToRemove.length === 0) {
+                    if (liveKeysToRemove.size === 0) {
                         renderStream();
                     }
                 });
