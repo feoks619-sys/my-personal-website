@@ -4482,7 +4482,7 @@
         }
 
         function getCommentSignature(comment = {}) {
-            return `${String(comment && comment.user ? comment.user : '').trim()}|${String(comment && comment.text ? comment.text : '').trim()}|${String(comment && comment.timestamp ? comment.timestamp : '').trim()}`;
+            return `${String(comment && comment.user ? comment.user : '').trim()}|${String(comment && comment.text ? comment.text : '').trim()}`;
         }
 
         function removePendingCommentBySignature(postKey, signature) {
@@ -4501,31 +4501,56 @@
             }
         }
 
+        function getReplySignature(reply = {}) {
+            return `${String(reply && reply.user ? reply.user : '').trim()}|${String(reply && reply.text ? reply.text : '').trim()}`;
+        }
+
+        function removePendingReplyBySignature(postKey, whisperKey, signature) {
+            try {
+                const pending = JSON.parse(localStorage.getItem('archive_pending_replies') || '{}');
+                const repliesForPost = pending[postKey] || {};
+                const repliesForWhisper = Array.isArray(repliesForPost[whisperKey]) ? repliesForPost[whisperKey] : [];
+                const filtered = repliesForWhisper.filter(reply => getReplySignature(reply) !== signature);
+                if (filtered.length === 0) {
+                    delete repliesForPost[whisperKey];
+                } else {
+                    repliesForPost[whisperKey] = filtered;
+                }
+                if (Object.keys(repliesForPost).length === 0) {
+                    delete pending[postKey];
+                } else {
+                    pending[postKey] = repliesForPost;
+                }
+                localStorage.setItem('archive_pending_replies', JSON.stringify(pending));
+            } catch (err) {
+                console.warn('Could not remove local pending reply:', err);
+            }
+        }
+
         function deleteWhisper(postKey, whisperKey, event) {
             if (event) event.stopPropagation();
             if (!confirm('Delete this comment for everyone?')) return;
+
+            const targetPost = findPostInCache(postKey);
+            const liveWhispers = targetPost && targetPost.whispers && typeof targetPost.whispers === 'object' ? targetPost.whispers : {};
+            const pendingPayload = JSON.parse(localStorage.getItem('archive_pending_comments') || '{}');
+            const pendingCommentsForPost = Array.isArray(pendingPayload[postKey]) ? pendingPayload[postKey] : [];
+            const commentSignature = whisperKey.startsWith('pending-')
+                ? getCommentSignature(pendingCommentsForPost[Number(whisperKey.replace('pending-', ''))] || {})
+                : getCommentSignature(liveWhispers[whisperKey] || {});
 
             const removePendingComment = () => {
                 try {
                     const pending = JSON.parse(localStorage.getItem('archive_pending_comments') || '{}');
                     const commentsForPost = pending[postKey];
-                    const index = Number(whisperKey.replace('pending-', ''));
-                    if (Array.isArray(commentsForPost) && !Number.isNaN(index) && commentsForPost[index]) {
-                        const deletedComment = commentsForPost[index];
-                        const commentSignature = getCommentSignature(deletedComment);
-                        archiveDeletedComment({
-                            localId: 'trash-' + Date.now() + '-pending',
-                            user: deletedComment.user || 'anonymous soul',
-                            text: deletedComment.text || '[deleted]',
-                            postKey,
-                            postSnippet: String(deletedComment.text || '').slice(0, 40),
-                            deletedBy: 'self',
-                            source: 'pendingComment',
-                            deletedAt: Date.now(),
-                            deletedAtText: new Date().toLocaleString()
-                        });
-
-                        removePendingCommentBySignature(postKey, commentSignature);
+                    if (Array.isArray(commentsForPost)) {
+                        const filtered = commentsForPost.filter(comment => getCommentSignature(comment) !== commentSignature);
+                        if (filtered.length === 0) {
+                            delete pending[postKey];
+                        } else {
+                            pending[postKey] = filtered;
+                        }
+                        localStorage.setItem('archive_pending_comments', JSON.stringify(pending));
                     }
                 } catch (err) {
                     console.warn('Could not remove local pending comment:', err);
@@ -4534,16 +4559,11 @@
 
             if (whisperKey.startsWith('pending-')) {
                 removePendingComment();
-                const targetPost = findPostInCache(postKey);
-                if (targetPost && targetPost.whispers && typeof targetPost.whispers === 'object') {
-                    const matchingLiveKey = Object.keys(targetPost.whispers).find((key) => {
-                        return getCommentSignature(targetPost.whispers[key]) === getCommentSignature(JSON.parse(localStorage.getItem('archive_pending_comments') || '{}')[postKey]?.[Number(whisperKey.replace('pending-', ''))] || {});
-                    });
-                    if (matchingLiveKey) {
-                        firebasePromiseWithTimeout(database.ref('posts/' + postKey + '/whispers/' + matchingLiveKey).remove(), 3000)
-                            .catch(err => console.warn('Could not delete matching live duplicate comment:', err));
-                    }
-                }
+                const liveKeysToRemove = Object.keys(liveWhispers).filter((key) => getCommentSignature(liveWhispers[key]) === commentSignature);
+                liveKeysToRemove.forEach((key) => {
+                    firebasePromiseWithTimeout(database.ref('posts/' + postKey + '/whispers/' + key).remove(), 3000)
+                        .catch(err => console.warn('Could not delete matching live duplicate comment:', err));
+                });
                 renderStream();
                 return;
             }
@@ -4552,8 +4572,8 @@
             firebasePromiseWithTimeout(commentRef.once('value'), 3000)
                 .then(snapshot => {
                     const comment = snapshot.val() || {};
-                    const commentSignature = getCommentSignature(comment);
-                    removePendingCommentBySignature(postKey, commentSignature);
+                    const removedSignature = getCommentSignature(comment);
+                    removePendingCommentBySignature(postKey, removedSignature);
                     const trashItem = {
                         localId: 'trash-' + Date.now() + '-' + Math.random().toString(36).slice(2),
                         user: comment.user || 'anonymous soul',
@@ -4571,12 +4591,18 @@
                     console.warn('Could not read comment for trash archive:', err);
                 })
                 .finally(() => {
-                    firebasePromiseWithTimeout(database.ref('posts/' + postKey + '/whispers/' + whisperKey).remove(), 3000)
-                        .then(() => renderStream())
-                        .catch(err => {
-                            console.warn('Could not delete comment:', err);
-                            renderStream();
-                        });
+                    const liveKeysToRemove = Object.keys(liveWhispers).filter((key) => getCommentSignature(liveWhispers[key]) === commentSignature);
+                    liveKeysToRemove.forEach((key) => {
+                        firebasePromiseWithTimeout(database.ref('posts/' + postKey + '/whispers/' + key).remove(), 3000)
+                            .then(() => renderStream())
+                            .catch(err => {
+                                console.warn('Could not delete comment:', err);
+                                renderStream();
+                            });
+                    });
+                    if (liveKeysToRemove.length === 0) {
+                        renderStream();
+                    }
                 });
         }
 
@@ -4584,19 +4610,29 @@
             if (event) event.stopPropagation();
             if (!confirm('Delete this reply?')) return;
 
+            const targetPost = findPostInCache(postKey);
+            const liveReplies = targetPost && targetPost.whispers && targetPost.whispers[whisperKey] && typeof targetPost.whispers[whisperKey].replies === 'object'
+                ? targetPost.whispers[whisperKey].replies
+                : {};
+
             if (replyKey && String(replyKey).startsWith('pending-')) {
                 try {
                     const pending = JSON.parse(localStorage.getItem('archive_pending_replies') || '{}');
                     const repliesForPost = pending[postKey] || {};
                     const repliesForWhisper = Array.isArray(repliesForPost[whisperKey]) ? repliesForPost[whisperKey] : [];
-                    const index = repliesForWhisper.findIndex(r => String(r.id) === replyKey);
-                    if (index !== -1) {
-                        repliesForWhisper.splice(index, 1);
-                        if (repliesForWhisper.length === 0) {
+                    const pendingReply = repliesForWhisper.find(r => String(r.id) === replyKey);
+                    const signature = getReplySignature(pendingReply || {});
+                    if (signature) {
+                        const filtered = repliesForWhisper.filter(r => getReplySignature(r) !== signature);
+                        if (filtered.length === 0) {
                             delete repliesForPost[whisperKey];
+                        } else {
+                            repliesForPost[whisperKey] = filtered;
                         }
                         if (Object.keys(repliesForPost).length === 0) {
                             delete pending[postKey];
+                        } else {
+                            pending[postKey] = repliesForPost;
                         }
                         localStorage.setItem('archive_pending_replies', JSON.stringify(pending));
                     }
@@ -4607,12 +4643,14 @@
                 return;
             }
 
-            firebasePromiseWithTimeout(database.ref('posts/' + postKey + '/whispers/' + whisperKey + '/replies/' + replyKey).remove(), 3000)
-                .then(() => renderStream())
-                .catch(err => {
-                    console.warn('Could not delete reply:', err);
-                    renderStream();
-                });
+            const signature = getReplySignature(liveReplies[replyKey] || {});
+            const liveKeysToRemove = Object.keys(liveReplies).filter((key) => getReplySignature(liveReplies[key]) === signature);
+            liveKeysToRemove.forEach((key) => {
+                firebasePromiseWithTimeout(database.ref('posts/' + postKey + '/whispers/' + whisperKey + '/replies/' + key).remove(), 3000)
+                    .catch(err => console.warn('Could not delete reply:', err));
+            });
+            removePendingReplyBySignature(postKey, whisperKey, signature);
+            renderStream();
         }
 
         function submitWhisperReply(postKey, whisperKey, inputId, event, asAdmin = false) {
@@ -4663,7 +4701,14 @@
                 let pending = JSON.parse(localStorage.getItem('archive_pending_replies') || '{}');
                 if (!pending[fbKey]) pending[fbKey] = {};
                 if (!Array.isArray(pending[fbKey][whisperKey])) pending[fbKey][whisperKey] = [];
-                pending[fbKey][whisperKey].push(replyPayload);
+                const normalizedText = String(replyPayload && replyPayload.text ? replyPayload.text : '').trim();
+                const signature = `${String(replyPayload && replyPayload.user ? replyPayload.user : '').trim()}|${normalizedText}`;
+                const existing = pending[fbKey][whisperKey].find((entry) => {
+                    return `${String(entry.user || '').trim()}|${String(entry.text || '').trim()}` === signature;
+                });
+                if (!existing) {
+                    pending[fbKey][whisperKey].push(replyPayload);
+                }
                 localStorage.setItem('archive_pending_replies', JSON.stringify(pending));
             } catch (e) {
                 console.warn('Could not store pending reply:', e);
@@ -5868,9 +5913,9 @@
                 let pending = JSON.parse(localStorage.getItem('archive_pending_comments') || '{}');
                 if (!pending[fbKey]) pending[fbKey] = [];
                 const normalizedText = String(text || '').trim();
-                const signature = `${String(claimedSoulTag || '').trim()}|${normalizedText}|${String(timestamp || '').trim()}`;
+                const signature = `${String(claimedSoulTag || '').trim()}|${normalizedText}`;
                 const existing = pending[fbKey].find((entry) => {
-                    return `${String(entry.user || '').trim()}|${String(entry.text || '').trim()}|${String(entry.timestamp || '').trim()}` === signature;
+                    return `${String(entry.user || '').trim()}|${String(entry.text || '').trim()}` === signature;
                 });
                 if (!existing) {
                     pending[fbKey].push({
