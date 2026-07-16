@@ -2232,6 +2232,22 @@
             const normalizedIncoming = Array.isArray(incomingPosts) ? incomingPosts : [];
             const merged = new Map();
 
+            const getRichnessScore = (post) => {
+                if (!post || typeof post !== 'object') return 0;
+                const whisperCount = post.whispers && typeof post.whispers === 'object' ? Object.keys(post.whispers).length : 0;
+                const replyCount = post.whispers && typeof post.whispers === 'object'
+                    ? Object.values(post.whispers).reduce((sum, whisper) => {
+                        const replies = whisper && typeof whisper === 'object' && whisper.replies && typeof whisper.replies === 'object'
+                            ? Object.keys(whisper.replies).length
+                            : 0;
+                        return sum + replies;
+                    }, 0)
+                    : 0;
+                const voterCount = post.voterRegistry && typeof post.voterRegistry === 'object' ? Object.keys(post.voterRegistry).length : 0;
+                const mediaCount = post.media ? 1 : 0;
+                return whisperCount * 10 + replyCount * 3 + voterCount * 2 + mediaCount;
+            };
+
             const addPost = (post) => {
                 if (!post || typeof post !== 'object') return;
                 const key = String(post.fbKey || post.id || '').trim();
@@ -2242,12 +2258,31 @@
                     merged.set(key, normalizedPost);
                     return;
                 }
+
                 const incomingScore = Number(normalizedPost.id || normalizedPost.timestamp || 0);
                 const existingScore = Number(existing.id || existing.timestamp || 0);
-                const shouldReplace = incomingScore > existingScore || (normalizedPost.pending === false && existing.pending === true);
-                if (shouldReplace) {
-                    merged.set(key, normalizedPost);
+                const incomingRichness = getRichnessScore(normalizedPost);
+                const existingRichness = getRichnessScore(existing);
+                const shouldReplace = incomingScore > existingScore || incomingRichness > existingRichness || (normalizedPost.pending === false && existing.pending === true);
+                if (!shouldReplace) {
+                    return;
                 }
+
+                const mergedPost = { ...existing, ...normalizedPost, fbKey: key };
+                if (incomingRichness >= existingRichness && normalizedPost.whispers && typeof normalizedPost.whispers === 'object' && Object.keys(normalizedPost.whispers).length > 0) {
+                    mergedPost.whispers = normalizedPost.whispers;
+                } else if (existingRichness > incomingRichness && existing.whispers && typeof existing.whispers === 'object' && Object.keys(existing.whispers).length > 0) {
+                    mergedPost.whispers = existing.whispers;
+                }
+                if (incomingRichness >= existingRichness && normalizedPost.voterRegistry && typeof normalizedPost.voterRegistry === 'object' && Object.keys(normalizedPost.voterRegistry).length > 0) {
+                    mergedPost.voterRegistry = normalizedPost.voterRegistry;
+                } else if (existingRichness > incomingRichness && existing.voterRegistry && typeof existing.voterRegistry === 'object' && Object.keys(existing.voterRegistry).length > 0) {
+                    mergedPost.voterRegistry = existing.voterRegistry;
+                }
+                if (normalizedPost.pending === false && existing.pending === true) {
+                    mergedPost.pending = false;
+                }
+                merged.set(key, mergedPost);
             };
 
             normalizedExisting.forEach(addPost);
