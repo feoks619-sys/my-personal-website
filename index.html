@@ -3890,8 +3890,14 @@
                         applyPostsPayload(data, 'listener');
                     } else {
                         listenerSeenData = true;
-                        globalPostsCache = [];
-                        setPostsLoadState('empty', 'No fragments are available right now.', null);
+                        const cached = getCachedPosts();
+                        if (cached.length > 0) {
+                            globalPostsCache = cached;
+                            setPostsLoadState('ready', 'Showing cached archive data.', null);
+                        } else {
+                            globalPostsCache = [];
+                            setPostsLoadState('empty', 'No fragments are available right now.', null);
+                        }
                         renderStream();
                     }
                 });
