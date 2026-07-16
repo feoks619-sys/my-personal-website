@@ -4392,6 +4392,8 @@
                 alert('Step 1: Click the icon ⚙️ in the top right\nStep 2: Enter your unique tag (nickname)\nStep 3: Click Claim Identity\n\nThen you can like!');
                 return;
             }
+            if (button.dataset.likeLocked === '1') return;
+            button.dataset.likeLocked = '1';
 
             const localCountElement = button.querySelector('.count');
             const targetPost = findPostInCache(fbKey) || null;
@@ -4423,13 +4425,19 @@
                         }
                     });
                 }
-                updatePostInCache(fbKey, { voterRegistry: registry, likes: newCount });
+                const updatedPost = { ...targetPost, voterRegistry: registry, likes: newCount, fbKey: targetPost.fbKey || fbKey };
+                globalPostsCache = replayPendingLikesIntoCache(mergePostsLists(globalPostsCache, [updatedPost]));
+                saveCachedPosts(globalPostsCache);
             }
 
             button.classList.toggle('liked', willLike);
             if (localCountElement) {
                 localCountElement.innerText = String(newCount);
             }
+
+            setTimeout(() => {
+                button.dataset.likeLocked = '0';
+            }, 180);
 
             // Keep the like interaction local-first so the recovered feed stays stable.
             // The live Realtime Database path is still unreliable for post writes, so the
@@ -4675,6 +4683,18 @@
                 refreshModerationState();
                 alert('@' + claimedSoulTag + ' has been auto-banned after 3 comments.');
                 return;
+            }
+
+            try {
+                const pendingComments = JSON.parse(localStorage.getItem('archive_pending_comments') || '{}');
+                const pendingForPost = Array.isArray(pendingComments[fbKey]) ? pendingComments[fbKey] : [];
+                const alreadyPending = pendingForPost.some(item => String(item.text || '').trim().toLowerCase() === whisperText.toLowerCase() && String(item.user || '').trim().toLowerCase() === normalizedHandle);
+                if (alreadyPending) {
+                    inputElement.value = "";
+                    return;
+                }
+            } catch (err) {
+                console.warn('Could not inspect pending comments before submit:', err);
             }
 
             inputElement.value = "...";
@@ -6213,28 +6233,37 @@
 
                 // Calculate exact whispers counts automatically
                 const whisperEntries = post.whispers && typeof post.whispers === 'object' ? Object.entries(post.whispers) : [];
+                const seenWhispers = new Map();
+                const dedupeEntry = (entryKey, entryValue) => {
+                    const signature = `${String(entryValue?.user || '').trim()}|${String(entryValue?.text || '').trim()}|${String(entryValue?.timestamp || '').trim()}`;
+                    if (!seenWhispers.has(signature)) {
+                        seenWhispers.set(signature, [entryKey, entryValue]);
+                    }
+                };
+                whisperEntries.forEach(([entryKey, entryValue]) => dedupeEntry(entryKey, entryValue));
                 try {
                     const pendingComments = JSON.parse(localStorage.getItem('archive_pending_comments') || '{}');
                     const pendingForPost = pendingComments[post.fbKey];
                     if (Array.isArray(pendingForPost)) {
                         pendingForPost.forEach((comment, idx) => {
-                            whisperEntries.push([`pending-${idx}`, {
+                            dedupeEntry(`pending-${idx}`, {
                                 text: comment.text || '',
                                 user: comment.user || comment.tag || 'anonymous soul',
                                 timestamp: comment.timestamp || Date.now(),
                                 isPending: true
-                            }]);
+                            });
                         });
                     }
                 } catch (e) {
                     console.warn('Could not read pending comments from localStorage:', e);
                 }
-                const whisperCount = whisperEntries.length;
+                const dedupedWhispers = Array.from(seenWhispers.values());
+                const whisperCount = dedupedWhispers.length;
 
                 let whispersHTML = "";
                 if (whisperCount > 0) {
                     whispersHTML = `<div class="whisper-stream">`;
-                    whisperEntries.forEach(([whisperKey, w]) => {
+                    dedupedWhispers.forEach(([whisperKey, w]) => {
                         const safeWhisper = w || {};
                         const userHandle = String(safeWhisper.user || "anonymous soul");
                         const letterIcon = String(userHandle).charAt(0).toUpperCase();
