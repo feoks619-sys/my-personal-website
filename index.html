@@ -2302,6 +2302,40 @@
                 return whisperCount * 10 + replyCount * 3 + voterCount * 2 + mediaCount;
             };
 
+            const mergeVoterRegistry = (existingRegistry, incomingRegistry) => {
+                const mergedRegistry = { ...(existingRegistry && typeof existingRegistry === 'object' ? existingRegistry : {}) };
+                const incomingEntries = incomingRegistry && typeof incomingRegistry === 'object' ? incomingRegistry : {};
+                Object.keys(incomingEntries).forEach((entryKey) => {
+                    const incomingEntry = incomingEntries[entryKey];
+                    const incomingFingerprint = incomingEntry && typeof incomingEntry === 'object'
+                        ? String(incomingEntry.fingerprint || '').trim()
+                        : String(incomingEntry || '').trim();
+                    if (!incomingFingerprint) {
+                        mergedRegistry[entryKey] = incomingEntry;
+                        return;
+                    }
+
+                    const existingMatchKey = Object.keys(mergedRegistry).find((key) => {
+                        const existingEntry = mergedRegistry[key];
+                        const existingFingerprint = existingEntry && typeof existingEntry === 'object'
+                            ? String(existingEntry.fingerprint || '').trim()
+                            : String(existingEntry || '').trim();
+                        return existingFingerprint === incomingFingerprint;
+                    });
+
+                    if (existingMatchKey) {
+                        const previousEntry = mergedRegistry[existingMatchKey] || {};
+                        mergedRegistry[existingMatchKey] = {
+                            ...(previousEntry && typeof previousEntry === 'object' ? previousEntry : {}),
+                            ...(incomingEntry && typeof incomingEntry === 'object' ? incomingEntry : { value: incomingEntry }),
+                        };
+                    } else {
+                        mergedRegistry[entryKey] = incomingEntry;
+                    }
+                });
+                return mergedRegistry;
+            };
+
             const addPost = (post) => {
                 if (!post || typeof post !== 'object') return;
                 const key = String(post.fbKey || post.id || '').trim();
@@ -2318,21 +2352,16 @@
                 const incomingRichness = getRichnessScore(normalizedPost);
                 const existingRichness = getRichnessScore(existing);
                 const shouldReplace = incomingScore > existingScore || incomingRichness > existingRichness || (normalizedPost.pending === false && existing.pending === true);
-                if (!shouldReplace) {
+                if (!shouldReplace && !normalizedPost.voterRegistry && !normalizedPost.whispers) {
                     return;
                 }
 
                 const mergedPost = { ...existing, ...normalizedPost, fbKey: key };
-                if (incomingRichness >= existingRichness && normalizedPost.whispers && typeof normalizedPost.whispers === 'object' && Object.keys(normalizedPost.whispers).length > 0) {
-                    mergedPost.whispers = normalizedPost.whispers;
-                } else if (existingRichness > incomingRichness && existing.whispers && typeof existing.whispers === 'object' && Object.keys(existing.whispers).length > 0) {
-                    mergedPost.whispers = existing.whispers;
-                }
-                if (incomingRichness >= existingRichness && normalizedPost.voterRegistry && typeof normalizedPost.voterRegistry === 'object' && Object.keys(normalizedPost.voterRegistry).length > 0) {
-                    mergedPost.voterRegistry = normalizedPost.voterRegistry;
-                } else if (existingRichness > incomingRichness && existing.voterRegistry && typeof existing.voterRegistry === 'object' && Object.keys(existing.voterRegistry).length > 0) {
-                    mergedPost.voterRegistry = existing.voterRegistry;
-                }
+                const existingWhispers = existing.whispers && typeof existing.whispers === 'object' ? existing.whispers : {};
+                const incomingWhispers = normalizedPost.whispers && typeof normalizedPost.whispers === 'object' ? normalizedPost.whispers : {};
+                mergedPost.whispers = { ...existingWhispers, ...incomingWhispers };
+                mergedPost.voterRegistry = mergeVoterRegistry(existing.voterRegistry, normalizedPost.voterRegistry);
+                mergedPost.likes = countUniqueLikeVoters(mergedPost);
                 if (normalizedPost.pending === false && existing.pending === true) {
                     mergedPost.pending = false;
                 }
@@ -2404,24 +2433,15 @@
             const target = findPostInCache(postKey);
             if (!target) {
                 const newPost = { fbKey: String(postKey || '').trim(), ...updates };
-                globalPostsCache = mergePostsLists(globalPostsCache, [newPost]);
+                globalPostsCache = replayPendingLikesIntoCache(mergePostsLists(globalPostsCache, [newPost]));
                 saveCachedPosts(globalPostsCache);
                 renderStream();
                 return newPost;
             }
 
             const updatedPost = { ...target, ...updates, fbKey: updates.fbKey || target.fbKey || String(postKey || '').trim() };
-            const index = globalPostsCache.findIndex((post) => {
-                const entryKey = String(post && post.fbKey ? post.fbKey : '').trim();
-                const entryId = String(post && post.id ? post.id : '').trim();
-                const targetKey = String(postKey || '').trim();
-                return entryKey === targetKey || entryId === targetKey || (entryKey.startsWith('local-') && targetKey.startsWith('local-') && entryKey === targetKey);
-            });
-            if (index >= 0) {
-                globalPostsCache[index] = updatedPost;
-            } else {
-                globalPostsCache = mergePostsLists(globalPostsCache, [updatedPost]);
-            }
+            const mergedCache = replayPendingLikesIntoCache(mergePostsLists(globalPostsCache, [updatedPost]));
+            globalPostsCache = mergedCache;
             saveCachedPosts(globalPostsCache);
             renderStream();
             return updatedPost;
