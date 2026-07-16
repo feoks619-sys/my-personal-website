@@ -4700,6 +4700,7 @@
                 text: replyText,
                 user: asAdmin ? 'admin' : (claimedSoulTag || 'anonymous soul'),
                 timestamp: Date.now(),
+                fingerprint: userFingerprint,
                 isAdmin: Boolean(asAdmin)
             };
 
@@ -4793,7 +4794,12 @@
 
             const commentTimestamp = Date.now();
             inputElement.value = "...";
-            const commentPayload = { text: whisperText, user: claimedSoulTag, timestamp: commentTimestamp };
+            const commentPayload = {
+                text: whisperText,
+                user: claimedSoulTag,
+                timestamp: commentTimestamp,
+                fingerprint: userFingerprint
+            };
             storePendingComment(fbKey, whisperText, commentTimestamp);
             inputElement.value = "";
             loadDirectMessages();
