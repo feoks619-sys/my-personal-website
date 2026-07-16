@@ -4400,6 +4400,12 @@
             const willLike = !isCurrentlyLiked;
             const newCount = willLike ? currentDisplayedCount + 1 : Math.max(0, currentDisplayedCount - 1);
 
+            if (willLike) {
+                storePendingLike(fbKey, true);
+            } else {
+                storePendingLike(fbKey, false);
+            }
+
             if (targetPost) {
                 const registry = { ...(targetPost.voterRegistry || {}) };
                 if (willLike) {
@@ -4423,12 +4429,6 @@
             button.classList.toggle('liked', willLike);
             if (localCountElement) {
                 localCountElement.innerText = String(newCount);
-            }
-
-            if (willLike) {
-                storePendingLike(fbKey, true);
-            } else {
-                storePendingLike(fbKey, false);
             }
 
             // Keep the like interaction local-first so the recovered feed stays stable.
