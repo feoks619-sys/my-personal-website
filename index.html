@@ -4682,7 +4682,13 @@
             }
 
             const signature = getReplySignature(liveReplies[replyKey] || {});
-            const liveKeysToRemove = Object.keys(liveReplies).filter((key) => getReplySignature(liveReplies[key]) === signature);
+            const liveKeysToRemove = new Set(Object.keys(liveReplies).filter((key) => {
+                if (key === replyKey) return true;
+                return getReplySignature(liveReplies[key]) === signature;
+            }));
+            if (replyKey) {
+                liveKeysToRemove.add(replyKey);
+            }
             liveKeysToRemove.forEach((key) => {
                 firebasePromiseWithTimeout(database.ref('posts/' + postKey + '/whispers/' + whisperKey + '/replies/' + key).remove(), 3000)
                     .catch(err => console.warn('Could not delete reply:', err));
@@ -6393,10 +6399,14 @@
                     whispersHTML = `<div class="whisper-stream">`;
                     dedupedWhispers.forEach(([whisperKey, w]) => {
                         const safeWhisper = w || {};
+                        const whisperText = String(safeWhisper.text || '').trim();
                         const userHandle = String(safeWhisper.user || "anonymous soul");
                         const letterIcon = String(userHandle).charAt(0).toUpperCase();
                         const bubbleBg = getAvatarColor(userHandle);
                         const replyEntries = safeWhisper.replies && typeof safeWhisper.replies === 'object' ? Object.entries(safeWhisper.replies) : [];
+                        if (!whisperText && replyEntries.length === 0) {
+                            return;
+                        }
                         const seenReplies = new Map();
                         const dedupeReplyEntry = (entryKey, entryValue) => {
                             const signature = `${String(entryValue?.user || '').trim()}|${String(entryValue?.text || '').trim()}`;
@@ -6429,7 +6439,7 @@
                                 <div class="whisper-avatar" style="background-color: ${bubbleBg};">${letterIcon}</div>
                                 <div class="whisper-details">
                                     <span class="whisper-user">@${escapeHtml(userHandle)}</span>
-                                    <span class="whisper-text">${escapeHtml(String(safeWhisper.text || ''))}</span>
+                                    ${whisperText ? `<span class="whisper-text">${escapeHtml(whisperText)}</span>` : ''}
                                     <div class="comment-time">${new Date(Number(safeWhisper.timestamp) || Date.now()).toLocaleString()}</div>
                                     ${isAdminLoggedIn || canDeleteWhisper ? `
                                         <div class="whisper-admin-actions">
