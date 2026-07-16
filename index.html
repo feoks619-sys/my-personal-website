@@ -2471,12 +2471,7 @@
             const normalized = normalizePostsPayload(data);
             normalized.sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
 
-            const baseCache = Array.isArray(globalPostsCache)
-                ? globalPostsCache
-                : [];
-            const mergedPosts = mergePostsLists(baseCache, normalized);
-            const hydratedPosts = replayPendingLikesIntoCache(mergedPosts);
-
+            const hydratedPosts = replayPendingLikesIntoCache(normalized);
             globalPostsCache = hydratedPosts;
             hydrateRegisteredSoulsFallback(hydratedPosts);
             if (source === 'listener') {
@@ -3953,16 +3948,10 @@
                 getFcmToken();
             }
 
-            const cachedPosts = getCachedPosts();
-            if (cachedPosts.length > 0) {
-                globalPostsCache = cachedPosts;
-                globalPostsCache.sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
-                setPostsLoadState('ready', 'Showing cached archive data.', null);
-                renderStream();
-            } else {
-                setPostsLoadState('loading', 'Loading fragments...');
-                renderStream();
-            }
+            globalPostsCache = [];
+            setPostsLoadState('loading', 'Loading fragments...');
+            renderStream();
+
             fetchPostsFromLocalArchive().catch(() => {});
 
             // Living Listener: Automatically triggers UI update across all global devices when data changes
