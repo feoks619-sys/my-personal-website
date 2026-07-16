@@ -2330,12 +2330,10 @@
             const normalized = normalizePostsPayload(data);
             normalized.sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
 
-            const pendingLocalPosts = Array.isArray(globalPostsCache)
-                ? globalPostsCache.filter((post) => post && post.pending === true)
+            const baseCache = Array.isArray(globalPostsCache)
+                ? globalPostsCache
                 : [];
-            const mergedPosts = source === 'local'
-                ? mergePostsLists(globalPostsCache || [], normalized)
-                : mergePostsLists(pendingLocalPosts, normalized);
+            const mergedPosts = mergePostsLists(baseCache, normalized);
 
             globalPostsCache = mergedPosts;
             hydrateRegisteredSoulsFallback(mergedPosts);
