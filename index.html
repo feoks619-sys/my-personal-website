@@ -4485,6 +4485,16 @@
             return `${String(comment && comment.user ? comment.user : '').trim()}|${String(comment && comment.text ? comment.text : '').trim()}`;
         }
 
+        function getCommentOwnerMatch(comment = {}, currentTag = '') {
+            const currentNormalizedTag = String(currentTag || '').trim().toLowerCase();
+            const commentUser = String(comment && comment.user ? comment.user : '').trim().toLowerCase();
+            const commentFingerprint = String(comment && comment.fingerprint ? comment.fingerprint : '').trim();
+            return Boolean(
+                (commentUser && commentUser === currentNormalizedTag) ||
+                (commentFingerprint && commentFingerprint === String(userFingerprint || '').trim())
+            );
+        }
+
         function removePendingCommentBySignature(postKey, signature) {
             try {
                 const pending = JSON.parse(localStorage.getItem('archive_pending_comments') || '{}');
@@ -4503,6 +4513,16 @@
 
         function getReplySignature(reply = {}) {
             return `${String(reply && reply.user ? reply.user : '').trim()}|${String(reply && reply.text ? reply.text : '').trim()}`;
+        }
+
+        function getReplyOwnerMatch(reply = {}, currentTag = '') {
+            const currentNormalizedTag = String(currentTag || '').trim().toLowerCase();
+            const replyUser = String(reply && reply.user ? reply.user : '').trim().toLowerCase();
+            const replyFingerprint = String(reply && reply.fingerprint ? reply.fingerprint : '').trim();
+            return Boolean(
+                (replyUser && replyUser === currentNormalizedTag) ||
+                (replyFingerprint && replyFingerprint === String(userFingerprint || '').trim())
+            );
         }
 
         function removePendingReplyBySignature(postKey, whisperKey, signature) {
@@ -6317,7 +6337,7 @@
                 const whisperEntries = post.whispers && typeof post.whispers === 'object' ? Object.entries(post.whispers) : [];
                 const seenWhispers = new Map();
                 const dedupeEntry = (entryKey, entryValue) => {
-                    const signature = `${String(entryValue?.user || '').trim()}|${String(entryValue?.text || '').trim()}|${String(entryValue?.timestamp || '').trim()}`;
+                    const signature = `${String(entryValue?.user || '').trim()}|${String(entryValue?.text || '').trim()}`;
                     if (!seenWhispers.has(signature)) {
                         seenWhispers.set(signature, [entryKey, entryValue]);
                     }
@@ -6332,6 +6352,7 @@
                                 text: comment.text || '',
                                 user: comment.user || comment.tag || 'anonymous soul',
                                 timestamp: comment.timestamp || Date.now(),
+                                fingerprint: comment.fingerprint || '',
                                 isPending: true
                             });
                         });
@@ -6351,13 +6372,21 @@
                         const letterIcon = String(userHandle).charAt(0).toUpperCase();
                         const bubbleBg = getAvatarColor(userHandle);
                         const replyEntries = safeWhisper.replies && typeof safeWhisper.replies === 'object' ? Object.entries(safeWhisper.replies) : [];
+                        const seenReplies = new Map();
+                        const dedupeReplyEntry = (entryKey, entryValue) => {
+                            const signature = `${String(entryValue?.user || '').trim()}|${String(entryValue?.text || '').trim()}`;
+                            if (!seenReplies.has(signature)) {
+                                seenReplies.set(signature, [entryKey, entryValue]);
+                            }
+                        };
+                        replyEntries.forEach(([entryKey, entryValue]) => dedupeReplyEntry(entryKey, entryValue));
                         try {
                             const pendingReplies = JSON.parse(localStorage.getItem('archive_pending_replies') || '{}');
                             const pendingForPost = pendingReplies[post.fbKey] || {};
                             const pendingForWhisper = pendingForPost[whisperKey] || [];
                             if (Array.isArray(pendingForWhisper)) {
                                 pendingForWhisper.forEach(reply => {
-                                    replyEntries.push([reply.id || `pending-${Date.now()}`, reply]);
+                                    dedupeReplyEntry(reply.id || `pending-${Date.now()}`, reply);
                                 });
                             }
                         } catch (e) {
@@ -6365,7 +6394,7 @@
                         }
                         const normalizedHandle = userHandle.toLowerCase();
                         const normalizedCurrentTag = String(claimedSoulTag || '').trim().toLowerCase();
-                        const canDeleteWhisper = isAdminLoggedIn || (w.user && String(w.user).trim().toLowerCase() === normalizedCurrentTag);
+                        const canDeleteWhisper = isAdminLoggedIn || getCommentOwnerMatch(w, claimedSoulTag);
                         const isBanned = Boolean(moderationState.bannedUsers[normalizedHandle]);
                         const replyInputId = `reply-input-${post.fbKey}-${whisperKey}`;
                         const replyPlaceholder = isAdminLoggedIn ? 'reply as admin...' : 'reply to this comment...';
@@ -6386,12 +6415,12 @@
                                         <input type="text" id="${replyInputId}" placeholder="${replyPlaceholder}">
                                         <button type="button" onclick="submitWhisperReply('${post.fbKey}', '${whisperKey}', '${replyInputId}', event, ${isAdminLoggedIn})">reply</button>
                                     </div>
-                                    ${replyEntries.length > 0 ? `
+                                    ${seenReplies.size > 0 ? `
                                         <div class="reply-list">
-                                            ${replyEntries.map(([replyKey, reply]) => {
+                                            ${Array.from(seenReplies.values()).map(([replyKey, reply]) => {
                                                 const isAdminReply = Boolean(reply.isAdmin || reply.user === 'admin' || reply.user === 'official');
                                                 const replyName = isAdminReply ? 'admin reply' : '@' + (String(reply.user || 'unknown'));
-                                                const canDelete = isAdminLoggedIn || (reply.user && String(reply.user).trim().toLowerCase() === normalizedCurrentTag);
+                                                const canDelete = isAdminLoggedIn || getReplyOwnerMatch(reply, claimedSoulTag);
                                                 return `
                                                     <div class="reply-bubble">
                                                         <div class="reply-meta">
