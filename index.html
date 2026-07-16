@@ -4558,6 +4558,7 @@
             const commentSignature = whisperKey.startsWith('pending-')
                 ? getCommentSignature(pendingCommentsForPost[Number(whisperKey.replace('pending-', ''))] || {})
                 : getCommentSignature(liveWhispers[whisperKey] || {});
+            const shouldDeleteCurrentKeyFallback = !commentSignature || !String(commentSignature).trim();
 
             const removePendingComment = () => {
                 try {
@@ -4579,7 +4580,10 @@
 
             if (whisperKey.startsWith('pending-')) {
                 removePendingComment();
-                const liveKeysToRemove = Object.keys(liveWhispers).filter((key) => getCommentSignature(liveWhispers[key]) === commentSignature);
+                const liveKeysToRemove = Object.keys(liveWhispers).filter((key) => {
+                    if (shouldDeleteCurrentKeyFallback && key === whisperKey) return true;
+                    return getCommentSignature(liveWhispers[key]) === commentSignature;
+                });
                 liveKeysToRemove.forEach((key) => {
                     firebasePromiseWithTimeout(database.ref('posts/' + postKey + '/whispers/' + key).remove(), 3000)
                         .catch(err => console.warn('Could not delete matching live duplicate comment:', err));
@@ -4611,7 +4615,10 @@
                     console.warn('Could not read comment for trash archive:', err);
                 })
                 .finally(() => {
-                    const liveKeysToRemove = Object.keys(liveWhispers).filter((key) => getCommentSignature(liveWhispers[key]) === commentSignature);
+                    const liveKeysToRemove = Object.keys(liveWhispers).filter((key) => {
+                        if (shouldDeleteCurrentKeyFallback && key === whisperKey) return true;
+                        return getCommentSignature(liveWhispers[key]) === commentSignature;
+                    });
                     liveKeysToRemove.forEach((key) => {
                         firebasePromiseWithTimeout(database.ref('posts/' + postKey + '/whispers/' + key).remove(), 3000)
                             .then(() => renderStream())
