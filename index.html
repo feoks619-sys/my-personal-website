@@ -1700,7 +1700,7 @@
         }
         .identity-overlay.show { opacity: 1; pointer-events: auto; }
         .identity-box {
-            max-width: 400px; width: 100%;
+            max-width: 420px; width: 100%;
             border: 1px solid #b5a880;
             background: #1c0205; padding: 35px 30px;
             border-radius: 12px;
@@ -1715,12 +1715,28 @@
             font-size: 0.85rem; color: #b5a880; margin-bottom: 25px;
             line-height: 1.5;
         }
+        .identity-tabs {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 20px;
+        }
+        .identity-tab {
+            background: transparent; border: 1px solid #b5a880; color: #b5a880;
+            font-family: inherit; font-size: 0.9rem; padding: 10px 14px; cursor: pointer;
+            border-radius: 999px; transition: all 0.3s ease;
+        }
+        .identity-tab.active, .identity-tab:hover { background: #b5a880; color: #1c0205; }
+        .identity-auth-panel {
+            display: none; flex-direction: column; gap: 12px;
+        }
+        .identity-auth-panel.active { display: flex; }
         .identity-input {
             width: 100%; background: rgba(0,0,0,0.2); border: 1px solid #3d050c;
             border-bottom: 2px solid #b5a880; color: #fffdec;
             font-size: 1rem; font-family: inherit; padding: 10px;
-            text-align: center; margin-bottom: 20px; outline: none;
+            text-align: center; margin-bottom: 0; outline: none;
             box-sizing: border-box; border-radius: 4px 4px 0 0;
+        }
+        .identity-input.invalid {
+            border-bottom-color: #ff6b79; color: #ffe5e8; box-shadow: 0 0 0 1px rgba(255, 107, 121, 0.35);
         }
         .identity-input:focus { border-bottom-color: #ffcbd2; background: rgba(0,0,0,0.4); }
         .identity-btn {
@@ -1730,8 +1746,34 @@
             border-radius: 20px; width: 100%; letter-spacing: 1px;
         }
         .identity-btn:hover { background: #b5a880; color: #1c0205; }
-        .identity-error { color: #ffcbd2; font-size: 0.85rem; margin-top: 15px; min-height: 18px; opacity: 0.7; transition: opacity 0.3s ease, transform 0.3s ease; }
-.identity-error.shake { opacity: 1; transform: translateX(-4px); animation: shakeText 0.5s ease-in-out; }
+        .identity-secondary {
+            background: transparent; border: 1px solid #6b111c; color: #f7d0d5;
+            font-family: inherit; font-size: 0.8rem; padding: 10px 14px; cursor: pointer;
+            width: 100%; border-radius: 999px;
+        }
+        .identity-secondary:hover { background: #6b111c; color: #fffdec; }
+        .identity-error { color: #ffcbd2; font-size: 0.85rem; min-height: 18px; opacity: 0.7; transition: opacity 0.3s ease, transform 0.3s ease; }
+        .identity-error.show { opacity: 1; }
+        .identity-error.shake { opacity: 1; transform: translateX(-4px); animation: shakeText 0.5s ease-in-out; }
+        .identity-status {
+            margin-top: 16px; font-size: 0.82rem; line-height: 1.5; color: #d8e1a7;
+            min-height: 20px;
+        }
+        .welcome-modal {
+            position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+            background: rgba(41, 3, 8, 0.9); z-index: 10001; padding: 24px;
+        }
+        .welcome-modal.show { display: flex; }
+        .welcome-modal-card {
+            max-width: 440px; width: 100%; background: #1c0205; border: 1px solid #b5a880;
+            padding: 28px; border-radius: 14px; text-align: center; box-shadow: 0 15px 40px rgba(0,0,0,0.6);
+        }
+        .welcome-modal-title {
+            font-size: 1.3rem; color: #fffdec; margin-bottom: 10px; letter-spacing: 1px;
+        }
+        .welcome-modal-message {
+            color: #b5a880; line-height: 1.6; font-size: 0.92rem;
+        }
         .shake {
             animation: shakeText 0.5s ease-in-out;
         }
@@ -1865,11 +1907,37 @@
         <div class="identity-box">
             <div class="identity-title">// who is reading?</div>
             <div class="identity-warning">
-                Warning: To preserve the peace of this space, do not use your real identity. Pick a mysterious tag, nickname, or pseudonym.
+                Create your archive account, keep your nickname, and sign in with your real email whenever you return.
             </div>
-            <input type="text" id="soul-tag-input" class="identity-input" placeholder="enter your unique tag..." maxlength="15">
-            <button class="identity-btn" onclick="claimSoulTag()">claim identity</button>
-            <div id="identity-error-msg" class="identity-error"></div>
+            <div class="identity-tabs">
+                <button type="button" class="identity-tab active" data-auth-tab="signup">Sign Up</button>
+                <button type="button" class="identity-tab" data-auth-tab="login">Log In</button>
+            </div>
+
+            <div id="auth-signup-panel" class="identity-auth-panel active">
+                <input type="text" id="signup-nickname-input" class="identity-input" placeholder="choose your nickname" maxlength="15">
+                <input type="email" id="signup-email-input" class="identity-input" placeholder="enter your email">
+                <input type="password" id="signup-password-input" class="identity-input" placeholder="create a password">
+                <button type="button" class="identity-btn" onclick="signUpWithAccount()">create account</button>
+                <div id="signup-error-msg" class="identity-error"></div>
+            </div>
+
+            <div id="auth-login-panel" class="identity-auth-panel">
+                <input type="email" id="login-email-input" class="identity-input" placeholder="your email">
+                <input type="password" id="login-password-input" class="identity-input" placeholder="your password">
+                <button type="button" class="identity-btn" onclick="loginWithAccount()">enter website</button>
+                <button type="button" class="identity-secondary" onclick="sendPasswordResetEmail()">forgot password?</button>
+                <div id="login-error-msg" class="identity-error"></div>
+            </div>
+
+            <div id="identity-status-msg" class="identity-status"></div>
+        </div>
+    </div>
+
+    <div id="welcome-modal" class="welcome-modal" aria-hidden="true">
+        <div class="welcome-modal-card">
+            <div class="welcome-modal-title">// welcome</div>
+            <div id="welcome-modal-message" class="welcome-modal-message"></div>
         </div>
     </div>
 
@@ -2090,6 +2158,7 @@
     </div>
 
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-storage.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-messaging.js"></script>
@@ -2110,12 +2179,19 @@
         firebase.initializeApp(firebaseConfig);
         const database = firebase.database();
         const storage = firebase.storage();
+        const auth = firebase.auth();
+        try {
+            auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(() => {});
+        } catch (err) {
+            console.warn('Could not set auth persistence:', err);
+        }
 
         const firebaseMessagingPublicKey = 'BIIMqkTstuf5ZzCxdkSXuhXedac6J6vhJDEptOLOqo2Oo7MzvahF7GVmEBUJczci6wo5zvCC2wndM9FdIa0nQX0';
         let messaging = null;
         let fcmToken = localStorage.getItem('archive_fcm_token') || "";
 
         let isAdminLoggedIn = false;
+        let currentAuthUser = null;
         let dmPendingAttachments = [];
         let dmPendingAttachmentType = null;
         let dmPendingAttachmentNames = [];
@@ -3946,6 +4022,35 @@
                 getFcmToken();
             }
 
+            document.querySelectorAll('.identity-tab').forEach((button) => {
+                button.addEventListener('click', () => setAuthTab(button.getAttribute('data-auth-tab')));
+            });
+
+            auth.onAuthStateChanged((user) => {
+                currentAuthUser = user;
+                if (!user) return;
+                if (user.emailVerified) {
+                    database.ref('user_profiles/' + user.uid).once('value').then((snapshot) => {
+                        const profile = (snapshot && snapshot.val) ? (snapshot.val() || {}) : {};
+                        const parsedNickname = formatNicknameForStorage(profile.nickname || 'reader');
+                        localStorage.setItem('archive_soul_tag', parsedNickname);
+                        claimedSoulTag = parsedNickname;
+                        syncDirectMessageButton();
+                        loadDirectMessages();
+                        const portal = document.getElementById('identity-portal');
+                        if (portal) {
+                            portal.classList.remove('show');
+                        }
+                    }).catch(() => {});
+                }
+            });
+
+            const signupNicknameInput = document.getElementById('signup-nickname-input');
+            if (signupNicknameInput) {
+                signupNicknameInput.addEventListener('input', validateSignupNicknameField);
+                signupNicknameInput.addEventListener('blur', validateSignupNicknameField);
+            }
+
             globalPostsCache = [];
             setPostsLoadState('loading', 'Loading fragments...');
             renderStream();
@@ -4088,6 +4193,254 @@
             }, 500);
         }
 
+        function setAuthTab(tab) {
+            const signupPanel = document.getElementById('auth-signup-panel');
+            const loginPanel = document.getElementById('auth-login-panel');
+            const tabButtons = document.querySelectorAll('.identity-tab');
+            const target = tab === 'login' ? 'login' : 'signup';
+            tabButtons.forEach((button) => {
+                const active = button.getAttribute('data-auth-tab') === target;
+                button.classList.toggle('active', active);
+            });
+            signupPanel.classList.toggle('active', target === 'signup');
+            loginPanel.classList.toggle('active', target === 'login');
+        }
+
+        function setIdentityMessage(message, kind = 'status') {
+            const container = document.getElementById('identity-status-msg');
+            if (!container) return;
+            container.innerText = message || '';
+            container.style.color = kind === 'error' ? '#ffcbd2' : '#d8e1a7';
+        }
+
+        function setInputError(inputId, message) {
+            const input = document.getElementById(inputId);
+            if (!input) return;
+            input.classList.toggle('invalid', Boolean(message));
+            if (message) {
+                const errorElement = document.getElementById(inputId.replace('-input', '-error-msg'));
+                if (errorElement) {
+                    errorElement.innerText = message;
+                    errorElement.classList.add('show');
+                }
+            }
+        }
+
+        function clearIdentityErrors() {
+            ['signup-nickname-input', 'signup-email-input', 'signup-password-input', 'login-email-input', 'login-password-input'].forEach((id) => {
+                const input = document.getElementById(id);
+                if (input) input.classList.remove('invalid');
+            });
+            ['signup-error-msg', 'login-error-msg'].forEach((id) => {
+                const el = document.getElementById(id);
+                if (el) {
+                    el.innerText = '';
+                    el.classList.remove('show');
+                }
+            });
+            setIdentityMessage('');
+        }
+
+        function formatNicknameForStorage(value) {
+            return String(value || '').trim().replace(/\s+/g, ' ');
+        }
+
+        async function nicknameAlreadyExists(targetTag) {
+            const normalizedTag = formatNicknameForStorage(targetTag).toLowerCase();
+            if (!normalizedTag) return false;
+            try {
+                const snapshot = await database.ref('registered_souls/' + normalizedTag).once('value');
+                if (snapshot && snapshot.val()) {
+                    return true;
+                }
+            } catch (err) {
+                console.warn('Could not check nickname existence:', err);
+            }
+            return false;
+        }
+
+        async function validateSignupNicknameField() {
+            const input = document.getElementById('signup-nickname-input');
+            const errorBox = document.getElementById('signup-error-msg');
+            if (!input) return;
+            const nickname = formatNicknameForStorage(input.value);
+            const reserved = nickname.toLowerCase() === 'admin' || nickname.toLowerCase() === 'mysecret123';
+            if (!nickname) {
+                input.classList.remove('invalid');
+                if (errorBox) {
+                    errorBox.innerText = '';
+                    errorBox.classList.remove('show');
+                }
+                return;
+            }
+            if (reserved) {
+                input.classList.add('invalid');
+                if (errorBox) {
+                    errorBox.innerText = 'That nickname is reserved. Pick a different one.';
+                    errorBox.classList.add('show');
+                }
+                return;
+            }
+            const exists = await nicknameAlreadyExists(nickname);
+            input.classList.toggle('invalid', exists);
+            if (errorBox) {
+                errorBox.innerText = exists ? 'That nickname is already taken. Pick a new one.' : '';
+                errorBox.classList.toggle('show', exists);
+            }
+        }
+
+        function showRandomWelcomeMessage(nickname) {
+            const welcomeMessages = [
+                `Welcome back, ${nickname}! Glad to have you back.`,
+                `Look who it is! Great to see you again, ${nickname}!`,
+                `Back so soon? You must really like it here, ${nickname}!`
+            ];
+            const welcomeModal = document.getElementById('welcome-modal');
+            const message = document.getElementById('welcome-modal-message');
+            if (!welcomeModal || !message) return;
+            const randomMessage = welcomeMessages[Math.floor(Math.random() * welcomeMessages.length)];
+            message.innerText = randomMessage;
+            welcomeModal.classList.add('show');
+            welcomeModal.setAttribute('aria-hidden', 'false');
+            setTimeout(() => {
+                welcomeModal.classList.remove('show');
+                welcomeModal.setAttribute('aria-hidden', 'true');
+            }, 3200);
+        }
+
+        async function signUpWithAccount() {
+            clearIdentityErrors();
+            const nicknameInput = document.getElementById('signup-nickname-input');
+            const emailInput = document.getElementById('signup-email-input');
+            const passwordInput = document.getElementById('signup-password-input');
+            const nickname = formatNicknameForStorage(nicknameInput ? nicknameInput.value : '');
+            const email = String(emailInput ? emailInput.value : '').trim();
+            const password = String(passwordInput ? passwordInput.value : '').trim();
+            const errorBox = document.getElementById('signup-error-msg');
+
+            if (!nickname) {
+                setInputError('signup-nickname-input', 'Choose a nickname first.');
+                if (errorBox) errorBox.innerText = 'Choose a nickname first.';
+                return;
+            }
+            if (nickname.toLowerCase() === 'admin' || nickname.toLowerCase() === 'mysecret123') {
+                setInputError('signup-nickname-input', 'That nickname is reserved.');
+                if (errorBox) errorBox.innerText = 'That nickname is reserved.';
+                return;
+            }
+            if (!email || !email.includes('@')) {
+                setInputError('signup-email-input', 'Enter a valid email address.');
+                if (errorBox) errorBox.innerText = 'Enter a valid email address.';
+                return;
+            }
+            if (!password || password.length < 6) {
+                setInputError('signup-password-input', 'Password must be at least 6 characters.');
+                if (errorBox) errorBox.innerText = 'Password must be at least 6 characters.';
+                return;
+            }
+
+            try {
+                const exists = await nicknameAlreadyExists(nickname);
+                if (exists) {
+                    setInputError('signup-nickname-input', 'That nickname is already taken. Pick a new one.');
+                    if (errorBox) errorBox.innerText = 'That nickname is already taken. Pick a new one.';
+                    return;
+                }
+
+                const credential = await auth.createUserWithEmailAndPassword(email, password);
+                const uid = credential && credential.user ? credential.user.uid : '';
+                if (uid) {
+                    await database.ref('user_profiles/' + uid).set({
+                        nickname,
+                        email,
+                        createdAt: Date.now(),
+                        emailVerified: false
+                    });
+                    await database.ref('registered_souls/' + nickname.toLowerCase()).set(uid);
+                    await credential.user.sendEmailVerification();
+                }
+
+                if (nicknameInput) nicknameInput.value = '';
+                if (emailInput) emailInput.value = '';
+                if (passwordInput) passwordInput.value = '';
+                setIdentityMessage('Account created. Check your inbox for the verification email, then log in.');
+                setAuthTab('login');
+            } catch (err) {
+                console.warn('Sign-up failed:', err);
+                const message = err && err.message ? err.message : 'Could not create your account right now.';
+                if (errorBox) errorBox.innerText = message;
+                setIdentityMessage(message, 'error');
+            }
+        }
+
+        async function loginWithAccount() {
+            clearIdentityErrors();
+            const emailInput = document.getElementById('login-email-input');
+            const passwordInput = document.getElementById('login-password-input');
+            const email = String(emailInput ? emailInput.value : '').trim();
+            const password = String(passwordInput ? passwordInput.value : '').trim();
+            const errorBox = document.getElementById('login-error-msg');
+
+            if (!email || !email.includes('@')) {
+                setInputError('login-email-input', 'Enter a valid email address.');
+                if (errorBox) errorBox.innerText = 'Enter a valid email address.';
+                return;
+            }
+            if (!password) {
+                setInputError('login-password-input', 'Enter your password.');
+                if (errorBox) errorBox.innerText = 'Enter your password.';
+                return;
+            }
+
+            try {
+                const credential = await auth.signInWithEmailAndPassword(email, password);
+                const user = credential && credential.user ? credential.user : null;
+                if (!user) throw new Error('Unable to log in with that account.');
+
+                if (!user.emailVerified) {
+                    await user.sendEmailVerification();
+                    setIdentityMessage('Please verify your email before continuing. We just sent a fresh verification email.', 'error');
+                    return;
+                }
+
+                const profileSnap = await database.ref('user_profiles/' + user.uid).once('value');
+                const profile = profileSnap && profileSnap.val ? profileSnap.val() : {};
+                const nickname = formatNicknameForStorage(profile.nickname || (email.split('@')[0] || 'reader'));
+
+                localStorage.setItem('archive_soul_tag', nickname);
+                claimedSoulTag = nickname;
+                syncDirectMessageButton();
+                loadDirectMessages();
+                document.getElementById('identity-portal').classList.remove('show');
+                setIdentityMessage('');
+                showRandomWelcomeMessage(nickname);
+                if (emailInput) emailInput.value = '';
+                if (passwordInput) passwordInput.value = '';
+                showFeed();
+            } catch (err) {
+                console.warn('Login failed:', err);
+                const message = err && err.message ? err.message : 'Unable to log in right now.';
+                if (errorBox) errorBox.innerText = message;
+                setIdentityMessage(message, 'error');
+            }
+        }
+
+        async function sendPasswordResetEmail() {
+            const emailInput = document.getElementById('login-email-input');
+            const email = String(emailInput ? emailInput.value : '').trim();
+            if (!email || !email.includes('@')) {
+                setInputError('login-email-input', 'Enter the email linked to your account first.');
+                return;
+            }
+            try {
+                await auth.sendPasswordResetEmail(email);
+                setIdentityMessage('Password reset email sent. Check your inbox and follow the link to choose a new password.');
+            } catch (err) {
+                console.warn('Password reset failed:', err);
+                setIdentityMessage(err && err.message ? err.message : 'Could not send the reset email.', 'error');
+            }
+        }
+
         function finalizeSoulTagClaim(targetTag) {
             const normalizedTag = String(targetTag || '').trim();
             if (!normalizedTag) return;
@@ -4108,19 +4461,17 @@
         }
 
         function claimSoulTag() {
-            const inputField = document.getElementById('soul-tag-input');
-            const errorElement = document.getElementById('identity-error-msg');
+            const inputField = document.getElementById('signup-nickname-input');
+            const errorElement = document.getElementById('signup-error-msg');
             const targetTag = (inputField && inputField.value ? inputField.value : '').trim();
 
-            errorElement.classList.remove('shake');
-
             if (targetTag === "") {
-                showCloudWarning("That whisper name cannot be empty. Try something mysterious.");
+                if (errorElement) errorElement.innerText = 'That whisper name cannot be empty. Try something mysterious.';
                 return;
             }
 
             if (targetTag.toLowerCase() === "admin" || targetTag.toLowerCase() === "mysecret123") {
-                showCloudWarning("That name is reserved. Choose a different whisper tag.");
+                if (errorElement) errorElement.innerText = 'That name is reserved. Choose a different whisper tag.';
                 return;
             }
 
