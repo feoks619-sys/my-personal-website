@@ -4357,18 +4357,12 @@
             document.getElementById('main-text').style.display = 'none';
             document.getElementById('text-gate').style.display = 'none';
             document.getElementById('feed-screen').style.display = 'flex';
-            if (!listenerSeenData && (!globalPostsCache || globalPostsCache.length === 0)) {
-                setPostsLoadState('loading', 'Loading fragments...');
-                renderStream();
-                fetchPostsFromLocalArchive().then((success) => {
-                    if (!success) {
-                        console.log('showFeed: archive fallback unavailable, trying the REST fallback');
-                        fetchPostsViaRest();
-                    }
-                }).catch(() => {
-                    fetchPostsViaRest();
-                });
-            }
+            setPostsLoadState('loading', 'Loading fragments...');
+            renderStream();
+
+            fetchPostsViaRest().catch(() => {
+                fetchPostsFromLocalArchive().catch(() => {});
+            });
             
             // If they haven't picked a profile name yet, intercept them with the portal
             if (!claimedSoulTag) {
@@ -4435,6 +4429,13 @@
                 const updatedPost = { ...targetPost, voterRegistry: registry, likes: newCount, fbKey: targetPost.fbKey || fbKey };
                 globalPostsCache = replayPendingLikesIntoCache(mergePostsLists(globalPostsCache, [updatedPost]));
                 saveCachedPosts(globalPostsCache);
+
+                if (database && database.ref && fbKey && !String(fbKey).startsWith('local-')) {
+                    database.ref('posts/' + fbKey + '/voterRegistry').set(registry)
+                        .catch(err => {
+                            console.warn('Could not sync like state to Firebase:', err);
+                        });
+                }
             }
 
             button.classList.toggle('liked', willLike);
@@ -4445,13 +4446,6 @@
             setTimeout(() => {
                 button.dataset.likeLocked = '0';
             }, 180);
-
-            // Keep the like interaction local-first so the recovered feed stays stable.
-            // The live Realtime Database path is still unreliable for post writes, so the
-            // UI now relies on the pending-like cache and the in-memory post update only.
-            if (database && database.ref) {
-                console.info('Like recorded locally; live sync is intentionally deferred to avoid feed instability.');
-            }
         }
 
         function toggleCommentsPanel(fbKey, button, event) {
@@ -4831,7 +4825,17 @@
 
             if (database && database.ref) {
                 const commentRef = database.ref('posts/' + fbKey + '/whispers').push();
+                const commentKey = commentRef.key;
                 firebasePromiseWithTimeout(commentRef.set(commentPayload), 3000).then(() => {
+                    const targetPost = findPostInCache(fbKey);
+                    if (targetPost) {
+                        const whisperMap = { ...(targetPost.whispers || {}) };
+                        whisperMap[commentKey] = commentPayload;
+                        const updatedPost = { ...targetPost, whispers: whisperMap, fbKey: targetPost.fbKey || fbKey };
+                        globalPostsCache = replayPendingLikesIntoCache(mergePostsLists(globalPostsCache, [updatedPost]));
+                        saveCachedPosts(globalPostsCache);
+                        renderStream();
+                    }
                     try {
                         database.ref('moderation/commentCounts/' + normalizedHandle).set(currentCount + 1);
                     } catch (e) {
