@@ -3589,18 +3589,6 @@
                         // ignore non-JSON entries
                     }
                 });
-                Object.keys(localStorage).forEach((storageKey) => {
-                    const raw = localStorage.getItem(storageKey);
-                    if (!raw) return;
-                    try {
-                        const parsed = JSON.parse(raw);
-                        if (parsed && (isLikelyDmConversation(parsed) || isLikelyDmMessage(parsed))) {
-                            candidates.push(parsed);
-                        }
-                    } catch (err) {
-                        // ignore non-JSON entries
-                    }
-                });
                 if (typeof window !== 'undefined' && window.__archiveDmConversations) {
                     candidates.push(window.__archiveDmConversations);
                 }
@@ -5225,11 +5213,7 @@
                 const data = snapshot && snapshot.val ? (snapshot.val() || {}) : (snapshot || {});
                 const remoteConversations = buildDmConversationViewsFromRawConversations(data);
                 const localConversations = getStoredDmConversationViews();
-                const fallbackConversations = buildDmConversationFallbackFromPosts(globalPostsCache.length > 0 ? globalPostsCache : getCachedPosts());
-                const mergedConversations = mergeDmInboxConversations(
-                    mergeDmInboxConversations(localConversations, fallbackConversations),
-                    remoteConversations
-                );
+                const mergedConversations = mergeDmInboxConversations(localConversations, remoteConversations);
                 dmInboxConversations = mergedConversations;
                 persistDmInboxConversations(mergedConversations);
                 renderDmInbox(mergedConversations);
@@ -5247,22 +5231,11 @@
                 }
                 adminDmInboxListener = (snapshot) => processAdminDmSnapshot(snapshot);
                 database.ref('direct_messages').on('value', adminDmInboxListener);
-
-                // Poll as a fallback in case the realtime listener stalls
-                try {
-                    if (adminDmPollIntervalId) clearInterval(adminDmPollIntervalId);
-                    adminDmPollIntervalId = setInterval(() => {
-                        database.ref('direct_messages').once('value').then(snap => processAdminDmSnapshot(snap)).catch(() => {});
-                    }, 5000);
-                } catch (pollErr) {
-                    console.warn('Could not start admin DM poll fallback:', pollErr);
-                }
             } catch (err) {
                 console.warn('Could not attach admin DM inbox listener:', err);
             }
         }
 
-        // When detaching listeners, ensure polling fallback is stopped
         function detachAdminDmInboxListener() {
             try {
                 if (adminDmInboxListener && database && database.ref) {
@@ -5270,36 +5243,6 @@
                 }
             } catch (e) {}
             adminDmInboxListener = null;
-            try {
-                if (adminDmPollIntervalId) {
-                    clearInterval(adminDmPollIntervalId);
-                    adminDmPollIntervalId = null;
-                }
-            } catch (e) {}
-        }
-
-        function stopAdminDmAutoRefresh() {
-            try {
-                if (adminDmRefreshIntervalId) {
-                    clearInterval(adminDmRefreshIntervalId);
-                    adminDmRefreshIntervalId = null;
-                }
-            } catch (e) {}
-        }
-
-        function startAdminDmAutoRefresh() {
-            stopAdminDmAutoRefresh();
-            try {
-                adminDmRefreshIntervalId = setInterval(() => {
-                    if (!adminDmSidebarVisible) {
-                        stopAdminDmAutoRefresh();
-                        return;
-                    }
-                    loadAdminDmInbox();
-                }, 5000);
-            } catch (e) {
-                console.warn('Could not start admin DM auto refresh:', e);
-            }
         }
 
         function stopAdminDmAutoRefresh() {
@@ -5457,15 +5400,16 @@
 
         function loadAdminDmInbox() {
             const localConversations = getStoredDmConversationViews();
-            const fallbackConversations = buildDmConversationFallbackFromPosts(globalPostsCache.length > 0 ? globalPostsCache : []);
-            const previewConversations = mergeDmInboxConversations(localConversations, fallbackConversations);
-            dmInboxConversations = previewConversations;
-            renderDmInbox(previewConversations);
+            const previewConversations = localConversations.slice();
+            if (previewConversations.length > 0) {
+                dmInboxConversations = previewConversations;
+                renderDmInbox(previewConversations);
+            }
 
             detachAdminDmInboxListener();
             attachAdminDmInboxListener();
 
-            // Load the latest remote data and merge it with local/fallback state.
+            // Load the latest remote data and merge it with the canonical local DM store only.
             Promise.allSettled([
                 fetchDirectMessagesFromApi().then((apiRaw) => {
                     return buildDmConversationViewsFromRawConversations(normalizeApiDmResponse(apiRaw));
@@ -5489,9 +5433,11 @@
                 renderDmInbox(mergedConversations);
             }).catch(err => {
                 console.warn('Could not load admin DM inbox from available sources:', err);
-                dmInboxConversations = previewConversations;
-                persistDmInboxConversations(previewConversations);
-                renderDmInbox(previewConversations);
+                if (previewConversations.length > 0) {
+                    dmInboxConversations = previewConversations;
+                    persistDmInboxConversations(previewConversations);
+                    renderDmInbox(previewConversations);
+                }
             });
         }
 
