@@ -5707,38 +5707,39 @@
             const commentsList = document.getElementById('live-comments-list');
             const likesList = document.getElementById('live-likes-list');
             const usersList = document.getElementById('live-users-list');
+            const availablePosts = Array.isArray(globalPostsCache) && globalPostsCache.length > 0
+                ? globalPostsCache
+                : getCachedPosts();
             
             commentsList.innerHTML = '<div class="trash-item">Loading recent comments...</div>';
             likesList.innerHTML = '<div class="trash-item">Loading recent likes...</div>';
             usersList.innerHTML = '<div class="trash-item">Loading active users...</div>';
 
             // Comments section
-            fetchPostsFromLocalArchive().then(() => {
-                if (globalPostsCache && globalPostsCache.length > 0) {
-                    const recent = [];
-                    globalPostsCache.forEach(post => {
-                        const w = post.whispers || {};
-                        Object.keys(w).forEach(wk => { recent.push({ postKey: post.fbKey, ...w[wk] }); });
+            if (availablePosts.length > 0) {
+                const recent = [];
+                availablePosts.forEach(post => {
+                    const w = post.whispers || {};
+                    Object.keys(w).forEach(wk => { recent.push({ postKey: post.fbKey, ...w[wk] }); });
+                });
+                // Add pending comments
+                try {
+                    const pending = JSON.parse(localStorage.getItem('archive_pending_comments') || '{}');
+                    Object.keys(pending).forEach(postKey => {
+                        if (Array.isArray(pending[postKey])) {
+                            pending[postKey].forEach(c => recent.push({ postKey, ...c, isPending: true }));
+                        }
                     });
-                    // Add pending comments
-                    try {
-                        const pending = JSON.parse(localStorage.getItem('archive_pending_comments') || '{}');
-                        Object.keys(pending).forEach(postKey => {
-                            if (Array.isArray(pending[postKey])) {
-                                pending[postKey].forEach(c => recent.push({ postKey, ...c, isPending: true }));
-                            }
-                        });
-                    } catch (e) {}
-                    recent.sort((a,b) => (b.timestamp||0)-(a.timestamp||0));
-                    const items = recent.slice(0,20);
-                    if (items.length === 0) commentsList.innerHTML = '<div class="trash-item">No recent comments.</div>';
-                    else commentsList.innerHTML = items.map(item => {
-                        const commenter = item.user || item.name || item.tag || item.handle || item.author || 'anon';
-                        const pending = item.isPending ? ' [pending]' : '';
-                        return `<div class="trash-item"><strong>${commenter}</strong>: ${item.text||''}<small>post: ${item.postKey} • ${new Date(item.timestamp||Date.now()).toLocaleString()}${pending}</small></div>`;
-                    }).join('');
-                    return;
-                }
+                } catch (e) {}
+                recent.sort((a,b) => (b.timestamp||0)-(a.timestamp||0));
+                const items = recent.slice(0,20);
+                if (items.length === 0) commentsList.innerHTML = '<div class="trash-item">No recent comments.</div>';
+                else commentsList.innerHTML = items.map(item => {
+                    const commenter = item.user || item.name || item.tag || item.handle || item.author || 'anon';
+                    const pending = item.isPending ? ' [pending]' : '';
+                    return `<div class="trash-item"><strong>${commenter}</strong>: ${item.text||''}<small>post: ${item.postKey} • ${new Date(item.timestamp||Date.now()).toLocaleString()}${pending}</small></div>`;
+                }).join('');
+            } else {
                 firebaseCallWithTimeout(database.ref('posts'), 3000).then(snapshot => {
                     const posts = snapshot.val() || {};
                     const recent = [];
@@ -5766,9 +5767,7 @@
                 }).catch(() => {
                     commentsList.innerHTML = '<div class="trash-item">No recent comments.</div>';
                 });
-            }).catch(() => {
-                commentsList.innerHTML = '<div class="trash-item">No recent comments.</div>';
-            });
+            }
 
             // Likes section
             Promise.all([
@@ -5856,13 +5855,13 @@
             // Users section
             firebaseCallWithTimeout(database.ref('registered_souls'), 3000).then(snapshot => {
                 const users = snapshot.val() || {};
-                const mergedUsers = { ...users, ...hydrateRegisteredSoulsFallback(globalPostsCache.length > 0 ? globalPostsCache : getCachedPosts()) };
+                const mergedUsers = { ...users, ...hydrateRegisteredSoulsFallback(availablePosts) };
                 persistRegisteredSoulsFallback(mergedUsers);
                 const keys = Object.keys(mergedUsers).sort();
                 if (keys.length === 0) usersList.innerHTML = '<div class="trash-item">No users registered.</div>';
                 else usersList.innerHTML = keys.slice(0,50).map(u=>`<div class="trash-item"><strong>${u}</strong></div>`).join('');
             }).catch(() => {
-                const fallbackUsers = hydrateRegisteredSoulsFallback(globalPostsCache.length > 0 ? globalPostsCache : getCachedPosts());
+                const fallbackUsers = hydrateRegisteredSoulsFallback(availablePosts);
                 const keys = Object.keys(fallbackUsers).sort();
                 if (keys.length === 0) usersList.innerHTML = '<div class="trash-item">No users registered.</div>';
                 else usersList.innerHTML = keys.slice(0,50).map(u=>`<div class="trash-item"><strong>${u}</strong></div>`).join('');
