@@ -2,7 +2,7 @@ importScripts('https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js');
 importScripts('https://www.gstatic.com/firebasejs/8.10.1/firebase-messaging.js');
 
 const firebaseConfig = {
-    apiKey: "AIzaSyB4mnp_22n7XYGCV3EDf4AuiEhN_AkSWb4",
+    apiKey: "AIzaSyCzoKmKxo_X696u6VF1XvB5jVtZGCD-RoA",
     authDomain: "my-archive-project-062608.firebaseapp.com",
     databaseURL: "https://my-archive-project-062608-default-rtdb.firebaseio.com/",
     projectId: "my-archive-project-062608",
