@@ -14,7 +14,7 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 
 const messaging = firebase.messaging();
-const CACHE_NAME = 'archive-site-v20260705-4';
+const CACHE_NAME = 'archive-site-v20260705-6';
 const APP_HTML = new URL('./index.html', self.registration.scope).toString();
 
 self.addEventListener('install', event => {
@@ -40,10 +40,10 @@ self.addEventListener('fetch', event => {
             fetch(event.request)
                 .then(response => {
                     const copy = response.clone();
-                    caches.open(CACHE_NAME).then(cache => cache.put(APP_HTML, copy));
+                    caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
                     return response;
                 })
-                .catch(() => caches.match(APP_HTML).then(cached => cached || caches.match('./')))
+                .catch(() => caches.match(event.request).then(cached => cached || caches.match(APP_HTML) || caches.match('./')))
         );
         return;
     }
@@ -51,6 +51,11 @@ self.addEventListener('fetch', event => {
     if (requestUrl.origin === self.location.origin) {
         event.respondWith(
             fetch(event.request)
+                .then(response => {
+                    const copy = response.clone();
+                    caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
+                    return response;
+                })
                 .catch(() => caches.match(event.request))
         );
     }

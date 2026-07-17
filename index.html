@@ -9,17 +9,27 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <meta name="app-version" content="20260705-5">
+    <meta name="app-version" content="20260705-6">
     <!-- Bump the typed.js query to force reload when we update the page -->
     <script src="https://unpkg.com/typed.js@2.1.0/dist/typed.umd.js?v=2"></script>
     <script>
         (function () {
             try {
-                const appVersion = '20260705-5';
+                const appVersion = '20260705-6';
                 const currentUrl = new URL(window.location.href);
                 const storedVersion = localStorage.getItem('archive_app_version');
                 const needsVersionQuery = !currentUrl.searchParams.get('v');
+                const shouldResetCache = storedVersion && storedVersion !== appVersion;
                 const needsReload = storedVersion !== appVersion || needsVersionQuery;
+                if (shouldResetCache) {
+                    ['archive_posts_cache', 'archive_pending_comments', 'archive_pending_replies', 'archive_pending_likes', 'archive_pending_trash', 'archive_dm_conversations', 'archive_registered_souls'].forEach((key) => {
+                        try {
+                            localStorage.removeItem(key);
+                        } catch (err) {
+                            console.warn('Could not clear stale cache key:', key, err);
+                        }
+                    });
+                }
                 if (needsReload) {
                     localStorage.setItem('archive_app_version', appVersion);
                     currentUrl.searchParams.set('v', appVersion);
