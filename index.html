@@ -2272,7 +2272,7 @@
         let selectedDmKey = null;
         let directMessagesCache = [];
         let adminDmInboxListener = null;
-        let adminDmPollIntervalId = null;
+        let adminDmRefreshIntervalId = null;
         let dmEditState = { conversationKey: null, messageKey: null, draft: '' };
         let dmOverlayVisible = false;
         let adminDmSidebarVisible = false;
@@ -5577,7 +5577,6 @@
             panel.setAttribute('aria-hidden', String(!open));
             if (open) {
                 loadAdminDmInbox();
-                startAdminDmAutoRefresh();
             } else {
                 stopAdminDmAutoRefresh();
                 detachAdminDmInboxListener();
@@ -5638,7 +5637,6 @@
                         stopAdminDmAutoRefresh();
                         return;
                     }
-                    loadAdminDmInbox(true);
                 }, 5000);
             } catch (e) {
                 console.warn('Could not start admin DM auto refresh:', e);
@@ -5784,16 +5782,16 @@
 
         function loadAdminDmInbox() {
             const localConversations = getStoredDmConversationViews();
-            const previewConversations = localConversations.slice();
-            if (previewConversations.length > 0) {
-                dmInboxConversations = previewConversations;
-                renderDmInbox(previewConversations);
+            const fallbackConversations = localConversations.slice();
+            if (fallbackConversations.length > 0 && !dmInboxConversations.length) {
+                dmInboxConversations = fallbackConversations;
+                renderDmInbox(fallbackConversations);
             }
 
             detachAdminDmInboxListener();
             attachAdminDmInboxListener();
 
-            // Load the latest remote data and merge it with the canonical local DM store only.
+            // Load the latest remote data and merge it once with the stored DM cache.
             Promise.allSettled([
                 fetchDirectMessagesFromApi().then((apiRaw) => {
                     return buildDmConversationViewsFromRawConversations(normalizeApiDmResponse(apiRaw));
@@ -5811,16 +5809,19 @@
                     sourceConversations.push(...apiResult.value);
                 }
 
-                const mergedConversations = mergeDmInboxConversations(previewConversations, sourceConversations);
+                const mergedConversations = mergeDmInboxConversations(dmInboxConversations.length ? dmInboxConversations : fallbackConversations, sourceConversations);
                 dmInboxConversations = mergedConversations;
                 persistDmInboxConversations(mergedConversations);
+                if (!selectedDmKey && mergedConversations.length > 0) {
+                    selectedDmKey = mergedConversations[0].key;
+                }
                 renderDmInbox(mergedConversations);
             }).catch(err => {
                 console.warn('Could not load admin DM inbox from available sources:', err);
-                if (previewConversations.length > 0) {
-                    dmInboxConversations = previewConversations;
-                    persistDmInboxConversations(previewConversations);
-                    renderDmInbox(previewConversations);
+                if (fallbackConversations.length > 0) {
+                    dmInboxConversations = fallbackConversations;
+                    persistDmInboxConversations(fallbackConversations);
+                    renderDmInbox(fallbackConversations);
                 }
             });
         }
