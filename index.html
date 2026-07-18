@@ -3565,13 +3565,31 @@
             return [];
         }
 
+        function getDmMessageIdentity(message) {
+            if (!message || typeof message !== 'object') return '';
+            const fbKey = String(message.fbKey || message.id || '').trim();
+            if (fbKey) return 'key:' + fbKey;
+            const signature = [
+                String(message.from || ''),
+                String(message.userTag || message.user || message.displayName || ''),
+                String(message.text || message.content || message.message || ''),
+                String(message.mediaUrl || ''),
+                String(message.mediaType || ''),
+                String(message.timestamp || 0),
+                String(message.isOfficial || '')
+            ].join('|');
+            return 'signature:' + signature;
+        }
+
         function mergeDmMessages(messages) {
             const messageMap = new Map();
             (messages || []).forEach((message) => {
                 if (!message || typeof message !== 'object') return;
-                const key = String(message.fbKey || message.id || '').trim();
-                if (!key) return;
-                messageMap.set(key, message);
+                const identity = getDmMessageIdentity(message);
+                if (!identity) return;
+                if (!messageMap.has(identity)) {
+                    messageMap.set(identity, message);
+                }
             });
             return Array.from(messageMap.values()).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
         }
@@ -3721,8 +3739,8 @@
                 ...payload,
                 fbKey: payload.fbKey || payload.id || `local-${payload.timestamp || Date.now()}-${Math.random().toString(36).slice(2, 8)}`
             };
-            messages.push(localMessage);
-            conversations[normalizedKey] = messages;
+            const mergedMessages = mergeDmMessages([...messages, localMessage]);
+            conversations[normalizedKey] = mergedMessages;
             saveStoredDmConversations(conversations);
             return localMessage;
         }
@@ -3799,7 +3817,7 @@
                 (conversations || []).forEach((conversation) => {
                     const key = normalizeDmConversationKey(conversation && conversation.key);
                     if (!key) return;
-                    conversationMap[key] = Array.isArray(conversation.messages) ? conversation.messages : [];
+                    conversationMap[key] = mergeDmMessages(Array.isArray(conversation.messages) ? conversation.messages : []);
                 });
                 saveStoredDmConversations(conversationMap);
             } catch (err) {
@@ -3852,23 +3870,30 @@
                 mediaType: mediaType || null,
                 timestamp: Date.now()
             };
-            persistDmMessageLocally(key, payload);
-            if (normalizeDmConversationKey(claimedSoulTag || localStorage.getItem('archive_soul_tag')) === key) {
-                const localMessages = getStoredDmConversationMessages(key);
-                directMessagesCache = localMessages;
-                renderDirectMessages(localMessages);
-            }
 
             try {
-                await saveDirectMessageToApi(key, payload);
-            } catch (err) {
-                console.warn('API DM save failed:', err);
-            }
-
-            try {
-                await database.ref('direct_messages/' + key).push(payload);
+                const remoteRef = database.ref('direct_messages/' + key).push();
+                payload.fbKey = remoteRef.key;
+                await remoteRef.set(payload);
+                persistDmMessageLocally(key, payload);
+                if (normalizeDmConversationKey(claimedSoulTag || localStorage.getItem('archive_soul_tag')) === key) {
+                    const storedMessages = getStoredDmConversationMessages(key);
+                    directMessagesCache = mergeDmMessages(storedMessages);
+                    renderDirectMessages(directMessagesCache);
+                }
+                try {
+                    await saveDirectMessageToApi(key, payload);
+                } catch (err) {
+                    console.warn('API DM save failed:', err);
+                }
             } catch (err) {
                 console.warn('DM send failed, stored locally instead:', err);
+                persistDmMessageLocally(key, payload);
+                if (normalizeDmConversationKey(claimedSoulTag || localStorage.getItem('archive_soul_tag')) === key) {
+                    const localMessages = getStoredDmConversationMessages(key);
+                    directMessagesCache = mergeDmMessages(localMessages);
+                    renderDirectMessages(directMessagesCache);
+                }
             }
 
             const input = document.getElementById('dm-input');
@@ -5679,36 +5704,44 @@
                     timestamp: Date.now(),
                     isOfficial: true
                 };
-                const localMessage = persistDmMessageLocally(selectedDmKey, payload);
                 try {
-                    const localMessages = getStoredDmConversationMessages(selectedDmKey);
-                    directMessagesCache = localMessages;
-                    renderDirectMessages(localMessages);
+                    const remoteRef = database.ref('direct_messages/' + selectedDmKey).push();
+                    payload.fbKey = remoteRef.key;
+                    await remoteRef.set(payload);
+                    const localMessage = persistDmMessageLocally(selectedDmKey, payload);
+                    try {
+                        const localMessages = getStoredDmConversationMessages(selectedDmKey);
+                        directMessagesCache = mergeDmMessages(localMessages);
+                        renderDirectMessages(directMessagesCache);
 
-                    // Update inbox preview immediately
-                    const storedViews = getStoredDmConversationViews();
-                    dmInboxConversations = mergeDmInboxConversations(dmInboxConversations || [], storedViews);
-                    persistDmInboxConversations(dmInboxConversations);
-                    renderDmInbox(dmInboxConversations);
-                } catch (uiErr) {
-                    console.warn('Could not render local admin DM immediately:', uiErr);
-                }
-                try {
-                    await saveDirectMessageToApi(selectedDmKey, payload);
-                } catch (err) {
-                    console.warn('Admin DM API save failed:', err);
-                }
-                try {
-                    await database.ref('direct_messages/' + selectedDmKey).push(payload);
+                        const storedViews = getStoredDmConversationViews();
+                        dmInboxConversations = mergeDmInboxConversations(dmInboxConversations || [], storedViews);
+                        persistDmInboxConversations(dmInboxConversations);
+                        renderDmInbox(dmInboxConversations);
+                    } catch (uiErr) {
+                        console.warn('Could not render local admin DM immediately:', uiErr);
+                    }
+                    try {
+                        await saveDirectMessageToApi(selectedDmKey, payload);
+                    } catch (err) {
+                        console.warn('Admin DM API save failed:', err);
+                    }
+                    if (input) input.value = '';
+                    resetAdminDmLoadingUi();
+                    clearAdminDmAttachment();
+                    loadDirectMessages();
+                    loadAdminDmInbox();
+                    return payload;
                 } catch (err) {
                     console.warn('Admin DM send failed, stored locally instead:', err);
+                    const localMessage = persistDmMessageLocally(selectedDmKey, payload);
+                    if (input) input.value = '';
+                    resetAdminDmLoadingUi();
+                    clearAdminDmAttachment();
+                    loadDirectMessages();
+                    loadAdminDmInbox();
+                    return localMessage;
                 }
-                if (input) input.value = '';
-                resetAdminDmLoadingUi();
-                clearAdminDmAttachment();
-                loadDirectMessages();
-                loadAdminDmInbox();
-                return payload;
             };
             if (attachments.length === 0) {
                 const inputField = document.getElementById('admin-dm-reply-input');
